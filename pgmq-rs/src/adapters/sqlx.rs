@@ -128,9 +128,9 @@ impl From<sqlx::Error> for PgmqError {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The `impl PGMQueueExt for PgPool` and `impl PGMQueueExt for Tx<'_>` are mechanically the same
-// except for what `e!()` expands to (the executor used by sqlx). We define the body once via
-// a macro and instantiate it twice.
+// The `impl PGMQueueExt for &mut PgConnection` and `impl PGMQueueExt for &mut Transaction<'_, Postgres>`
+// are mechanically the same except for what `e!()` expands to (the sqlx executor used to run
+// each query). We define the body once via a macro and instantiate it twice.
 // ---------------------------------------------------------------------------------------------
 
 macro_rules! impl_pgmq_for_sqlx {

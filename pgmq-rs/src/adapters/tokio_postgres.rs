@@ -34,7 +34,7 @@
 //!
 //! ```ignore
 //! let mut client = pool.get().await?;
-//! pgmq::install::tokio_postgres::install_sql_from_embedded(&mut **client).await?;
+//! pgmq::install::tokio_postgres::install_sql_from_embedded(&mut client).await?;
 //! ```
 //!
 //! With a non-pooled connection:
@@ -55,20 +55,13 @@
 //! use pgmq::PGMQueueExt;
 //! use pgmq::pg_ext::VisibilityTimeoutOffset;
 //!
-//! let client = pool.get().await?;             // deadpool_postgres::Client
-//! client.create("orders").await?;        // deref through Object<Manager>+ClientWrapper to &Client
-//!
+//! let client = pool.get().await?;        // e.g. deadpool_postgres::Client — derefs to &Client
+//! client.create("orders").await?;        // auto-deref + auto-ref does the rest
 //! let id = client.send("orders", &my_order).await?;
-//!
 //! let msg: Option<pgmq::Message<MyOrder>> =
 //!     client.read("orders", VisibilityTimeoutOffset::seconds(30)).await?;
-//!
 //! client.archive("orders", id).await?;
 //! ```
-//!
-//! The `&**client` dance is because deadpool's `Object<Manager>` derefs through `ClientWrapper`
-//! to `tokio_postgres::Client`. With bb8 or mobc the exact deref chain differs slightly. In
-//! a tight loop you can bind it once: `let c: &tokio_postgres::Client = &**client;`.
 //!
 //! ## With a user-managed transaction
 //!
@@ -98,8 +91,8 @@
 //! let (client, conn) = tokio_postgres::connect(url, NoTls).await?;
 //! tokio::spawn(async move { conn.await.ok(); });
 //!
-//! (&client).create("q").await?;
-//! (&client).send("q", &payload).await?;
+//! client.create("q").await?;
+//! client.send("q", &payload).await?;
 //! ```
 
 use super::helpers::check_input;

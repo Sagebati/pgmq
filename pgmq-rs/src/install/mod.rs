@@ -47,7 +47,7 @@
 //!
 //! // tokio-postgres (bring your own pool; install takes a `&mut Client`)
 //! let mut client = pool.get().await?;
-//! pgmq::install::tokio_postgres::install_sql_from_embedded(&mut **client).await?;
+//! pgmq::install::tokio_postgres::install_sql_from_embedded(&mut client).await?;
 //!
 //! // diesel-async
 //! let pool: diesel_async::pooled_connection::deadpool::Pool<AsyncPgConnection> = /* … */;

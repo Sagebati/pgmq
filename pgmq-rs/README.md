@@ -2,137 +2,157 @@
 
 [![Latest Version](https://img.shields.io/crates/v/pgmq.svg)](https://crates.io/crates/pgmq)
 
-The Rust client for PGMQ. This gives you an ORM-like experience with the Postgres extension and makes managing connection pools, transactions, and serialization/deserialization much easier.
+The Rust client for [PGMQ](https://github.com/pgmq/pgmq), a lightweight, durable message queue built on top of the
+`pgmq` Postgres extension.
 
+`pgmq` is an **extension trait**: bring [`PGMQueueExt`] into scope and call queue methods directly on your existing
+Postgres connection or transaction. There's no constructor and no pool wrapper — you bring your own pool (or no pool
+at all). Works with **sqlx** (default), **tokio-postgres**, **diesel-async**, and **diesel** (sync).
+
+## Quick start (sqlx)
+
+```toml
+[dependencies]
+pgmq = { version = "0.34", features = ["install-sql-embedded"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres"] }
+```
+
+```rust
+use pgmq::PGMQueueExt;
+use pgmq::pg_ext::VisibilityTimeoutOffset;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Debug)]
+struct MyMessage { foo: String }
+
+#[tokio::main]
+async fn main() -> Result<(), pgmq::PgmqError> {
+    let pool = sqlx::PgPool::connect("postgres://postgres:postgres@localhost:5432/postgres").await.unwrap();
+
+    // One-time: install the pgmq schema into your database (idempotent).
+    pgmq::install::sqlx::install_sql_from_embedded(&pool).await?;
+
+    // Acquire a connection from your pool and call methods on it.
+    let mut conn = pool.acquire().await.unwrap();
+    conn.create("my_queue").await?;
+
+    let id = conn.send("my_queue", &MyMessage { foo: "bar".into() }).await?;
+
+    let received: Option<pgmq::Message<MyMessage>> =
+        conn.read("my_queue", VisibilityTimeoutOffset::seconds(30)).await?;
+    if let Some(msg) = received {
+        conn.archive("my_queue", msg.msg_id).await?;
+    }
+    Ok(())
+}
+```
+
+## Supported drivers
+
+| Driver | Feature | `PGMQueueExt` implemented on |
+|---|---|---|
+| [sqlx](https://github.com/launchbadge/sqlx) (default) | `sqlx` | `&mut PgConnection`, `&mut Transaction<'_, Postgres>` |
+| [tokio-postgres](https://github.com/sfackler/rust-postgres) | `tokio-postgres` | `&Client`, `&Transaction<'_>` |
+| [diesel-async](https://github.com/weiznich/diesel_async) | `diesel-async` | `&mut AsyncPgConnection` |
+| [diesel](https://github.com/diesel-rs/diesel) (sync) | `diesel-sync` | `&mut PgConnection` |
+
+All four drivers share the same trait surface. Switching drivers means changing how you obtain a connection — the queue
+calls themselves are identical.
+
+```toml
+# Use tokio-postgres instead of sqlx
+pgmq = { version = "0.34", default-features = false, features = ["tokio-postgres", "install-sql-embedded"] }
+```
+
+Each adapter has its own module-level documentation covering setup, pool usage, transactions, and install with
+runnable examples: see [`pgmq::adapters::sqlx`](https://docs.rs/pgmq/latest/pgmq/adapters/sqlx/),
+[`pgmq::adapters::tokio_postgres`](https://docs.rs/pgmq/latest/pgmq/adapters/tokio_postgres/),
+[`pgmq::adapters::diesel_async`](https://docs.rs/pgmq/latest/pgmq/adapters/diesel_async/),
+[`pgmq::adapters::diesel_sync`](https://docs.rs/pgmq/latest/pgmq/adapters/diesel_sync/).
+
+## Composing with your own transactions
+
+Each adapter also implements `PGMQueueExt` on its driver's transaction type, so enqueue/dequeue can be atomic with
+your own business work:
+
+```rust,no_run
+# use pgmq::PGMQueueExt;
+# async fn example(pool: sqlx::PgPool) -> Result<(), pgmq::PgmqError> {
+let mut tx = pool.begin().await?;
+sqlx::query("INSERT INTO orders (id) VALUES ($1)").bind(1i64).execute(&mut *tx).await?;
+tx.send("orders_queue", &"order #1").await?;
+tx.commit().await?;
+# Ok(())
+# }
+```
 
 ## Installing PGMQ
 
-PGMQ can be installed into any existing Postgres database using this Rust client. This is useful if the PGMQ extension
-is not supported by your PostgreSQL instance. The installation performed by the Rust client is versioned, which means
-it can be used to perform a fresh installation of PGMQ, or it can upgrade an existing installation to a newer version.
+PGMQ can be installed into any Postgres database directly from this client — useful when the `pgmq` extension binary
+isn't available on your Postgres instance. Two install methods, both idempotent and version-aware:
 
-Two installation methods are supported. One method uses SQL scripts embedded in the Rust crate, while the other fetches
-the SQL scripts from the PGMQ GitHub repo. The embedded approach does not require external network requests but only supports
-installing (or upgrading to) the version bundled with the crate. The GitHub approach requires several network requests to GitHub,
-but allows installing (or upgrading to) any version available in the repo.
+- **Embedded** (`install-sql-embedded`): SQL scripts shipped with the crate. No network. Pins to the version bundled
+  with this crate.
+- **From GitHub** (`install-sql-github`): fetches scripts from the pgmq GitHub repo. Requires network. Lets you pin
+  a specific extension version.
 
-### Create the DB
+### In Rust
 
-Run standard Postgres using Docker:
-
-```bash
-docker run -d -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:latest
+```rust,no_run
+# async fn ex() -> Result<(), pgmq::PgmqError> {
+let pool = sqlx::PgPool::connect("postgres://...").await.unwrap();
+pgmq::install::sqlx::install_sql_from_embedded(&pool).await?;
+// or pin a specific version from GitHub:
+pgmq::install::sqlx::install_sql_from_github(&pool, Some("1.9.0")).await?;
+# Ok(())
+# }
 ```
 
-### Initialize applied migrations table
+For other drivers, see the per-driver install module:
+[`pgmq::install::tokio_postgres`](https://docs.rs/pgmq/latest/pgmq/install/tokio_postgres/),
+[`pgmq::install::diesel_async`](https://docs.rs/pgmq/latest/pgmq/install/diesel_async/),
+[`pgmq::install::diesel_sync`](https://docs.rs/pgmq/latest/pgmq/install/diesel_sync/) (sync, embedded only).
 
-In crate versions <= 0.32.1, the crate did not track which SQL scripts had already been run, which makes upgrading to a
-new version difficult. To switch from the old approach to the new approach, first perform the "initialize applied migrations table"
-workflow.
+### Via CLI (one-shot install, no app code)
 
-This method is not needed for fresh installations, or if the new SQL-only installation method was used to install PGMQ.
-
-
-#### Via the CLI
-
-```shell
-# Install the PGMQ Rust CLI
+```bash
 cargo install pgmq --features cli --bin pgmq-cli
-# Replace the DB url and the version
-pgmq-cli install -d postgres://postgres:postgres@localhost:5432/postgres init-migrations-table -v 1.9.0
-```
-
-#### In Rust
-
-Add PGMQ to your `Cargo.toml` with the `install-sql` feature enabled:
-
-```bash
-cargo add pgmq --features install-sql
-```
-
-```rust
-async fn init_migrations_table(pool: sqlx::Pool<sqlx::Postgres>) -> Result<(), pgmq::PgmqError> {
-    let queue = pgmq::PGMQueueExt::new_with_pool(pool).await;
-    // Replace the version
-    queue.init_migrations_table("1.9.0").await?;
-    Ok(())
-}
-```
-
-### Install using the embedded scripts
-#### Via CLI
-
-```bash
-# Install the PGMQ Rust CLI
-cargo install pgmq --features cli --bin pgmq-cli
-# Replace the DB url
 pgmq-cli install -d postgres://postgres:postgres@localhost:5432/postgres install-from-embedded
-```
-
-#### In Rust
-
-See also, the [install example](examples/install.rs)
-
-Add PGMQ to your `Cargo.toml` with the `install-sql-embedded` feature enabled:
-
-```bash
-cargo add pgmq --features install-sql-embedded
-```
-
-```rust
-async fn install_sql(pool: sqlx::Pool<sqlx::Postgres>) -> Result<(), pgmq::PgmqError> {
-    let queue = pgmq::PGMQueueExt::new_with_pool(pool).await;
-    queue.install_sql_from_embedded().await?;
-    Ok(())
-}
-```
-
-### Install using the scripts fetched from GitHub
-#### Via CLI
-
-```bash
-# Install the PGMQ Rust CLI
-cargo install pgmq --features cli --bin pgmq-cli
-# Replace the DB url and the version
+# or
 pgmq-cli install -d postgres://postgres:postgres@localhost:5432/postgres install-from-github -v 1.9.0
 ```
 
-#### In Rust
+### Upgrading from pre-versioned installs (<= 0.32.1)
 
-See also, the [install example](examples/install.rs)
-
-Add PGMQ to your `Cargo.toml` with the `install-sql-github` feature enabled:
+If you used the very old pre-versioned installer, run `init-migrations-table` once to seed the migration tracking
+table at your current version, then run the regular installer:
 
 ```bash
-cargo add pgmq --features install-sql-github
+pgmq-cli install -d postgres://... init-migrations-table -v 1.9.0
+pgmq-cli install -d postgres://... install-from-embedded
 ```
 
-```rust
-async fn install_sql(pool: sqlx::Pool<sqlx::Postgres>) -> Result<(), pgmq::PgmqError> {
-    let queue = pgmq::PGMQueueExt::new_with_pool(pool).await;
-    queue.install_sql_from_github(Some("1.9.0")).await?;
-    Ok(())
-}
-```
+Not needed for fresh installations.
+
+## Optional features
+
+- `tracing` — adds `#[tracing::instrument(skip_all)]` to every queue method. Off by default; opt in with `features = ["tracing"]`. Conservative defaults — span timing only, no payload capture.
 
 ## Examples
 
-The project contains several [examples](./examples/). You can run these using Cargo.
+Runnable examples in [`examples/`](./examples/):
 
-A basic example displaying the primary features:
 ```bash
 cargo run --example basic
-```
-
-How to install PGMQ using the Rust client from within your application:
-
-```bash
+cargo run --example transactions --features install-sql-embedded
+cargo run --example tokio_postgres_basic --no-default-features --features tokio-postgres,install-sql-embedded
 cargo run --example install --features install-sql-github,install-sql-embedded
 ```
 
-## Serialization and Deserialization
+## Messages
 
-Messages can be parsed as `serde_json::Value` or into a struct of your design. `queue.read()` returns an `Result<Option<Message<T>>, PgmqError>`
-where `T` is the type of the message on the queue. It returns an error when there is an issue parsing the message (`PgmqError::JsonParsingError`) or if PGMQ is unable to reach postgres (`PgmqError::DatabaseError`).
+Messages can be any `Serialize + Deserialize` type. `conn.read::<T>("queue", vt)` returns
+`Result<Option<Message<T>>, PgmqError>`; `PgmqError::JsonParsingError` is returned if the on-queue payload can't
+deserialize to `T`, and `PgmqError::DatabaseError` if the underlying driver fails.
 
 License: [PostgreSQL](LICENSE)
