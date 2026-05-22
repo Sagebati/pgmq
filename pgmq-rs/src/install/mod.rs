@@ -72,6 +72,7 @@
 mod embedded;
 #[cfg(feature = "install-sql-github")]
 mod github;
+mod internal;
 mod script;
 mod version;
 
@@ -96,48 +97,9 @@ fn install_err(err: impl ToString) -> PgmqError {
     PgmqError::InstallationError(err.to_string())
 }
 
-// Note: the advisory lock key is now inlined as a literal in `sql/install/{init,setup_migrations_table}.sql`
-// since the simple-query protocol used by `batch_execute` doesn't support parameters. See those
-// .sql files' comments for the literal value and its derivation.
-
-/// A row from `pgmq.__pgmq_migrations`.
-#[derive(Debug)]
-pub(crate) struct AppliedMigration {
-    pub name: String,
-    pub version: Version,
-}
-
-/// Given the list of available migration scripts plus the list of already-applied migrations,
-/// return the subset that still needs to be applied, ordered for execution.
-pub(crate) fn filter_unapplied_scripts(
-    available: Vec<script::MigrationScript>,
-    applied: &[AppliedMigration],
-) -> Vec<script::MigrationScript> {
-    use itertools::Itertools;
-    available
-        .into_iter()
-        .filter(|script| !applied.iter().any(|a| a.name == script.name.original))
-        .sorted()
-        .collect()
-}
-
-/// Find the maximum version among already-applied migrations.
-pub(crate) fn max_applied_version(applied: &[AppliedMigration]) -> Option<&Version> {
-    applied.iter().map(|a| &a.version).max()
-}
-
-#[cfg(feature = "install-sql-embedded")]
-pub(crate) fn embedded_fetcher() -> embedded::EmbeddedScriptFetcher {
-    embedded::EmbeddedScriptFetcher
-}
-
-#[cfg(feature = "install-sql-github")]
-pub(crate) async fn github_fetcher(
-    version: Option<&str>,
-) -> Result<github::GitHubScriptFetcher, PgmqError> {
-    github::GitHubScriptFetcher::new(version).await
-}
-
+// Note: shared install internals (`AppliedMigration`, the script-fetching helpers, the SQL
+// constants) live in the private `internal` submodule above. They are intentionally not part
+// of the public API; per-driver install modules access them via `super::internal::*`.
 
 #[cfg(test)]
 mod tests {

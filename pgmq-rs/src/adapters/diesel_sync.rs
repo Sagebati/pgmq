@@ -118,16 +118,14 @@
 //! [async]: crate::adapters::diesel_async
 
 use crate::errors::PgmqError;
-use crate::pg_ext::{
-    poll_interval_to_ms, poll_timeout_to_secs, serialize_list, serialize_optional_list,
-    PGMQueueExt, VisibilityTimeoutOffset,
-};
-use crate::query;
+use crate::pg_ext::{PGMQueueExt, VisibilityTimeoutOffset};
+use super::helpers::{poll_interval_to_ms, poll_timeout_to_secs, serialize_list, serialize_optional_list};
+use super::query;
 use crate::types::{
     ListNotifyInsertThrottlesRow, ListTopicBindingsRow, Message, PGMQueueMeta, QueueMetrics,
     SendBatchTopicRow,
 };
-use crate::util::check_input;
+use super::helpers::check_input;
 use async_trait::async_trait;
 use diesel::pg::{Pg, PgConnection};
 use diesel::{sql_query, sql_types, OptionalExtension, QueryableByName, RunQueryDsl};

@@ -13,6 +13,11 @@
 //! Each module's documentation covers setup, pool usage, transactions, and install with
 //! runnable examples for that driver.
 
+// Private — SQL constants and shared helpers used by the sibling adapters only.
+// Adapters access via `super::query::*` and `super::helpers::*`.
+mod helpers;
+mod query;
+
 #[cfg(feature = "sqlx")]
 pub mod sqlx;
 

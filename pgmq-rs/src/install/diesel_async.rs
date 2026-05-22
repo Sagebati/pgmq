@@ -3,10 +3,8 @@
 
 use crate::errors::PgmqError;
 use crate::install::script::{ParsedScriptName, ScriptFetcher};
-use crate::install::{
-    embedded_fetcher, filter_unapplied_scripts, max_applied_version, AppliedMigration, Version,
-};
-use crate::query::install as q;
+use super::internal::*;
+use super::Version;
 use diesel::sql_types;
 use diesel::{sql_query, QueryableByName};
 use diesel_async::pooled_connection::deadpool::Pool;
@@ -26,7 +24,7 @@ pub async fn init(pool: &Pool<AsyncPgConnection>) -> Result<(), PgmqError> {
     let mut conn = pool.get().await?;
     conn.transaction::<_, PgmqError, _>(|conn| {
         async move {
-            conn.batch_execute(q::INIT).await?;
+            conn.batch_execute(INIT_SQL).await?;
             Ok(())
         }
         .scope_boxed()
@@ -76,7 +74,7 @@ pub async fn install_sql_from_github(
     pool: &Pool<AsyncPgConnection>,
     version: Option<&str>,
 ) -> Result<(), PgmqError> {
-    let fetcher = crate::install::github_fetcher(version).await?;
+    let fetcher = super::internal::github_fetcher(version).await?;
     install_sql(pool, fetcher).await
 }
 
@@ -129,7 +127,7 @@ async fn install_sql<F: ScriptFetcher + Send>(
 }
 
 async fn create_migrations_table(conn: &mut AsyncPgConnection) -> Result<(), PgmqError> {
-    conn.batch_execute(q::SETUP_MIGRATIONS_TABLE).await?;
+    conn.batch_execute(SETUP_MIGRATIONS_TABLE_SQL).await?;
     Ok(())
 }
 
@@ -137,7 +135,7 @@ async fn fetch_applied(
     conn: &mut AsyncPgConnection,
 ) -> Result<Vec<AppliedMigration>, PgmqError> {
     let rows: Vec<AppliedMigrationRow> =
-        sql_query(q::SELECT_APPLIED_MIGRATIONS)
+        sql_query(SELECT_APPLIED_MIGRATIONS_SQL)
             .load(conn)
             .await?;
     rows.into_iter()
@@ -154,7 +152,7 @@ async fn insert_applied(
     conn: &mut AsyncPgConnection,
     name: &ParsedScriptName,
 ) -> Result<(), PgmqError> {
-    sql_query(q::INSERT_APPLIED_MIGRATION)
+    sql_query(INSERT_APPLIED_MIGRATION_SQL)
         .bind::<sql_types::Text, _>(&name.original)
         .bind::<sql_types::Text, _>(name.to.to_string())
         .execute(conn)

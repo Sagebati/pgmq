@@ -3,10 +3,8 @@
 
 use crate::errors::PgmqError;
 use crate::install::script::{ParsedScriptName, ScriptFetcher};
-use crate::install::{
-    embedded_fetcher, filter_unapplied_scripts, max_applied_version, AppliedMigration, Version,
-};
-use crate::query::install as q;
+use super::internal::*;
+use super::Version;
 use sqlx::{PgPool, Postgres, Transaction};
 use std::str::FromStr;
 
@@ -14,7 +12,7 @@ use std::str::FromStr;
 /// uses a transaction-scoped advisory lock to safely handle concurrent callers.
 pub async fn init(pool: &PgPool) -> Result<(), PgmqError> {
     let mut tx = pool.begin().await?;
-    sqlx::raw_sql(q::INIT).execute(&mut *tx).await?;
+    sqlx::raw_sql(INIT_SQL).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -47,7 +45,7 @@ pub async fn install_sql_from_github(
     pool: &PgPool,
     version: Option<&str>,
 ) -> Result<(), PgmqError> {
-    let fetcher = crate::install::github_fetcher(version).await?;
+    let fetcher = super::internal::github_fetcher(version).await?;
     install_sql(pool, fetcher).await
 }
 
@@ -86,7 +84,7 @@ async fn install_sql(pool: &PgPool, script_fetcher: impl ScriptFetcher) -> Resul
 }
 
 async fn create_migrations_table(tx: &mut Transaction<'static, Postgres>) -> Result<(), PgmqError> {
-    sqlx::raw_sql(q::SETUP_MIGRATIONS_TABLE)
+    sqlx::raw_sql(SETUP_MIGRATIONS_TABLE_SQL)
         .execute(&mut **tx)
         .await?;
     Ok(())
@@ -96,7 +94,7 @@ async fn fetch_applied(
     tx: &mut Transaction<'static, Postgres>,
 ) -> Result<Vec<AppliedMigration>, PgmqError> {
     let rows: Vec<(String, String)> =
-        sqlx::query_as(q::SELECT_APPLIED_MIGRATIONS)
+        sqlx::query_as(SELECT_APPLIED_MIGRATIONS_SQL)
             .fetch_all(&mut **tx)
             .await?;
     rows.into_iter()
@@ -113,7 +111,7 @@ async fn insert_applied(
     tx: &mut Transaction<'static, Postgres>,
     name: &ParsedScriptName,
 ) -> Result<(), PgmqError> {
-    sqlx::query(q::INSERT_APPLIED_MIGRATION)
+    sqlx::query(INSERT_APPLIED_MIGRATION_SQL)
         .bind(&name.original)
         .bind(name.to.to_string())
         .execute(&mut **tx)

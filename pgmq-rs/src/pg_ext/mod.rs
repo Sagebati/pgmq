@@ -65,8 +65,6 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 pub use visibility_timeout_offest::VisibilityTimeoutOffset;
 
-pub(crate) const DEFAULT_POLL_TIMEOUT_S: i32 = 5;
-pub(crate) const DEFAULT_POLL_INTERVAL_MS: i32 = 250;
 
 /// Queue API for the `pgmq` Postgres extension. Implemented natively by each driver adapter.
 /// Bring this trait into scope to call queue methods directly on your pool or transaction.
@@ -285,29 +283,8 @@ pub trait PGMQueueExt {
     async fn metrics_all(self) -> Result<Vec<QueueMetrics>, PgmqError>;
 }
 
-/// Helpers used internally by adapters; exposed crate-internally only.
-pub(crate) fn poll_timeout_to_secs(d: Option<std::time::Duration>) -> i32 {
-    d.map_or(DEFAULT_POLL_TIMEOUT_S, |t| t.as_secs() as i32)
-}
-
-pub(crate) fn poll_interval_to_ms(d: Option<std::time::Duration>) -> i32 {
-    d.map_or(DEFAULT_POLL_INTERVAL_MS, |i| i.as_millis() as i32)
-}
-
-pub(crate) fn serialize_list<T: Serialize>(
-    list: &[T],
-) -> Result<Vec<serde_json::Value>, serde_json::Error> {
-    list.iter().map(serde_json::to_value).collect()
-}
-
-pub(crate) fn serialize_optional_list<H: Serialize>(
-    list: Option<&[H]>,
-) -> Result<Option<Vec<serde_json::Value>>, serde_json::Error> {
-    match list {
-        Some(l) => Ok(Some(serialize_list(l)?)),
-        None => Ok(None),
-    }
-}
+// Adapter-internal helpers (poll_*_to_*, serialize_*_list, check_input, DEFAULT_POLL_*) live
+// in `crate::adapters::helpers` (private module).
 
 /// Translate the given queue name into the name of the Postgres notification channel that will
 /// be triggered when using [`PGMQueueExt::enable_notify_insert`]. Listen on this channel to

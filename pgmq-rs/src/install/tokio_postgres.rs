@@ -5,10 +5,8 @@
 
 use crate::errors::PgmqError;
 use crate::install::script::{ParsedScriptName, ScriptFetcher};
-use crate::install::{
-    embedded_fetcher, filter_unapplied_scripts, max_applied_version, AppliedMigration, Version,
-};
-use crate::query::install as q;
+use super::internal::*;
+use super::Version;
 use std::str::FromStr;
 use tokio_postgres::{Client, Transaction};
 
@@ -16,7 +14,7 @@ use tokio_postgres::{Client, Transaction};
 /// uses a transaction-scoped advisory lock to safely handle concurrent callers.
 pub async fn init(client: &mut Client) -> Result<(), PgmqError> {
     let tx = client.transaction().await?;
-    tx.batch_execute(q::INIT).await?;
+    tx.batch_execute(INIT_SQL).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -52,7 +50,7 @@ pub async fn install_sql_from_github(
     client: &mut Client,
     version: Option<&str>,
 ) -> Result<(), PgmqError> {
-    let fetcher = crate::install::github_fetcher(version).await?;
+    let fetcher = super::internal::github_fetcher(version).await?;
     install_sql(client, fetcher).await
 }
 
@@ -86,13 +84,13 @@ async fn install_sql(
 }
 
 async fn create_migrations_table(tx: &Transaction<'_>) -> Result<(), PgmqError> {
-    tx.batch_execute(q::SETUP_MIGRATIONS_TABLE).await?;
+    tx.batch_execute(SETUP_MIGRATIONS_TABLE_SQL).await?;
     Ok(())
 }
 
 async fn fetch_applied(tx: &Transaction<'_>) -> Result<Vec<AppliedMigration>, PgmqError> {
     let rows = tx
-        .query(q::SELECT_APPLIED_MIGRATIONS, &[])
+        .query(SELECT_APPLIED_MIGRATIONS_SQL, &[])
         .await?;
     rows.into_iter()
         .map(|r| {
@@ -118,7 +116,7 @@ async fn insert_applied(
 ) -> Result<(), PgmqError> {
     let version = name.to.to_string();
     tx.execute(
-        q::INSERT_APPLIED_MIGRATION,
+        INSERT_APPLIED_MIGRATION_SQL,
         &[&name.original, &version],
     )
     .await?;

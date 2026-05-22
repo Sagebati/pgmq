@@ -7,10 +7,8 @@
 
 use crate::errors::PgmqError;
 use crate::install::script::ParsedScriptName;
-use crate::install::{
-    filter_unapplied_scripts, max_applied_version, AppliedMigration, Version,
-};
-use crate::query::install as q;
+use super::internal::*;
+use super::Version;
 use diesel::connection::SimpleConnection;
 use diesel::pg::PgConnection;
 use diesel::{sql_query, sql_types, Connection, QueryableByName, RunQueryDsl};
@@ -26,7 +24,7 @@ struct AppliedMigrationRow {
 
 pub fn init(conn: &mut PgConnection) -> Result<(), PgmqError> {
     conn.transaction::<_, PgmqError, _>(|conn| {
-        conn.batch_execute(q::INIT)?;
+        conn.batch_execute(INIT_SQL)?;
         Ok(())
     })
 }
@@ -61,7 +59,7 @@ pub fn install_sql_from_embedded(conn: &mut PgConnection) -> Result<(), PgmqErro
         Ok(max_applied_version(&applied).cloned())
     })?;
 
-    let available = crate::install::embedded_fetcher().fetch_sync(installed_version_opt.as_ref())?;
+    let available = embedded_fetcher().fetch_sync(installed_version_opt.as_ref())?;
 
     conn.transaction::<_, PgmqError, _>(|conn| {
         create_migrations_table(conn)?;
@@ -76,13 +74,13 @@ pub fn install_sql_from_embedded(conn: &mut PgConnection) -> Result<(), PgmqErro
 }
 
 fn create_migrations_table(conn: &mut PgConnection) -> Result<(), PgmqError> {
-    conn.batch_execute(q::SETUP_MIGRATIONS_TABLE)?;
+    conn.batch_execute(SETUP_MIGRATIONS_TABLE_SQL)?;
     Ok(())
 }
 
 fn fetch_applied(conn: &mut PgConnection) -> Result<Vec<AppliedMigration>, PgmqError> {
     let rows: Vec<AppliedMigrationRow> =
-        sql_query(q::SELECT_APPLIED_MIGRATIONS).load(conn)?;
+        sql_query(SELECT_APPLIED_MIGRATIONS_SQL).load(conn)?;
     rows.into_iter()
         .map(|r| {
             Ok(AppliedMigration {
@@ -94,7 +92,7 @@ fn fetch_applied(conn: &mut PgConnection) -> Result<Vec<AppliedMigration>, PgmqE
 }
 
 fn insert_applied(conn: &mut PgConnection, name: &ParsedScriptName) -> Result<(), PgmqError> {
-    sql_query(q::INSERT_APPLIED_MIGRATION)
+    sql_query(INSERT_APPLIED_MIGRATION_SQL)
         .bind::<sql_types::Text, _>(&name.original)
         .bind::<sql_types::Text, _>(name.to.to_string())
         .execute(conn)?;

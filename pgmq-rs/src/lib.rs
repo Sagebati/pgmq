@@ -123,9 +123,6 @@ pub mod errors;
 pub mod install;
 pub mod pg_ext;
 pub mod types;
-pub mod util;
-
-pub(crate) mod query;
 
 pub use errors::PgmqError;
 pub use pg_ext::PGMQueueExt;

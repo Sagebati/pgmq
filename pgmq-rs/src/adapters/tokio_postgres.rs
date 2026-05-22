@@ -103,16 +103,14 @@
 //! ```
 
 use crate::errors::PgmqError;
-use crate::pg_ext::{
-    poll_interval_to_ms, poll_timeout_to_secs, serialize_list, serialize_optional_list,
-    PGMQueueExt, VisibilityTimeoutOffset,
-};
-use crate::query;
+use crate::pg_ext::{PGMQueueExt, VisibilityTimeoutOffset};
+use super::helpers::{poll_interval_to_ms, poll_timeout_to_secs, serialize_list, serialize_optional_list};
+use super::query;
 use crate::types::{
     ListNotifyInsertThrottlesRow, ListTopicBindingsRow, Message, PGMQueueMeta, QueueMetrics,
     SendBatchTopicRow,
 };
-use crate::util::check_input;
+use super::helpers::check_input;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio_postgres::types::ToSql;
@@ -121,6 +119,95 @@ use tokio_postgres::GenericClient;
 impl From<tokio_postgres::Error> for PgmqError {
     fn from(err: tokio_postgres::Error) -> Self {
         PgmqError::DatabaseError(err.to_string())
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Private inherent row decoders on the DTOs. Inherent methods defined in this module are not
+// visible outside it — keeps `from_tokio_postgres_row` out of the public API on the DTOs.
+// ---------------------------------------------------------------------------------------------
+
+fn col<T>(
+    res: Result<T, tokio_postgres::Error>,
+    col_name: &str,
+) -> Result<T, PgmqError> {
+    res.map_err(|e| PgmqError::RowDecodeError {
+        column: col_name.into(),
+        reason: e.to_string(),
+    })
+}
+
+impl PGMQueueMeta {
+    fn from_tokio_postgres_row(row: &tokio_postgres::Row) -> Result<Self, PgmqError> {
+        Ok(Self {
+            queue_name: col(row.try_get("queue_name"), "queue_name")?,
+            is_partitioned: col(row.try_get("is_partitioned"), "is_partitioned")?,
+            is_unlogged: col(row.try_get("is_unlogged"), "is_unlogged")?,
+            created_at: col(row.try_get("created_at"), "created_at")?,
+        })
+    }
+}
+
+impl<T: for<'de> Deserialize<'de>> Message<T> {
+    fn from_tokio_postgres_row(row: &tokio_postgres::Row) -> Result<Self, PgmqError> {
+        let raw_msg: serde_json::Value = col(row.try_get("message"), "message")?;
+        Ok(Self {
+            msg_id: col(row.try_get("msg_id"), "msg_id")?,
+            vt: col(row.try_get("vt"), "vt")?,
+            enqueued_at: col(row.try_get("enqueued_at"), "enqueued_at")?,
+            read_ct: col(row.try_get("read_ct"), "read_ct")?,
+            message: serde_json::from_value(raw_msg)?,
+        })
+    }
+}
+
+impl SendBatchTopicRow {
+    fn from_tokio_postgres_row(row: &tokio_postgres::Row) -> Result<Self, PgmqError> {
+        Ok(Self {
+            queue_name: col(row.try_get("queue_name"), "queue_name")?,
+            msg_id: col(row.try_get("msg_id"), "msg_id")?,
+        })
+    }
+}
+
+impl ListTopicBindingsRow {
+    fn from_tokio_postgres_row(row: &tokio_postgres::Row) -> Result<Self, PgmqError> {
+        Ok(Self {
+            pattern: col(row.try_get("pattern"), "pattern")?,
+            queue_name: col(row.try_get("queue_name"), "queue_name")?,
+            bound_at: col(row.try_get("bound_at"), "bound_at")?,
+            compiled_regex: col(row.try_get("compiled_regex"), "compiled_regex")?,
+        })
+    }
+}
+
+impl ListNotifyInsertThrottlesRow {
+    fn from_tokio_postgres_row(row: &tokio_postgres::Row) -> Result<Self, PgmqError> {
+        Ok(Self {
+            queue_name: col(row.try_get("queue_name"), "queue_name")?,
+            throttle_interval_ms: col(
+                row.try_get("throttle_interval_ms"),
+                "throttle_interval_ms",
+            )?,
+            last_notified_at: col(row.try_get("last_notified_at"), "last_notified_at")?,
+        })
+    }
+}
+
+impl QueueMetrics {
+    fn from_tokio_postgres_row(row: &tokio_postgres::Row) -> Result<Self, PgmqError> {
+        Ok(Self {
+            queue_name: col(row.try_get("queue_name"), "queue_name")?,
+            queue_length: col(row.try_get("queue_length"), "queue_length")?,
+            newest_msg_age_sec: col(row.try_get("newest_msg_age_sec"), "newest_msg_age_sec")?,
+            oldest_msg_age_sec: col(row.try_get("oldest_msg_age_sec"), "oldest_msg_age_sec")?,
+            total_messages: col(row.try_get("total_messages"), "total_messages")?,
+            scrape_time: col(row.try_get("scrape_time"), "scrape_time")?,
+            queue_visible_length: col(
+                row.try_get("queue_visible_length"),
+                "queue_visible_length",
+            )?,
+        })
     }
 }
 
