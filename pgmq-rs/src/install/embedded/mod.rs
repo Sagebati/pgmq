@@ -23,6 +23,18 @@ impl ScriptFetcher for EmbeddedScriptFetcher {
         &self,
         installed_version: Option<&Version>,
     ) -> Result<Vec<MigrationScript>, PgmqError> {
+        self.fetch_sync(installed_version)
+    }
+}
+
+impl EmbeddedScriptFetcher {
+    /// Synchronous variant of [`Self::fetch`]. The embedded fetcher does no I/O — it reads
+    /// from compile-time-embedded scripts — so callers in sync contexts (e.g. the
+    /// `diesel-sync` install path) can use this directly without an async runtime.
+    pub(crate) fn fetch_sync(
+        &self,
+        installed_version: Option<&Version>,
+    ) -> Result<Vec<MigrationScript>, PgmqError> {
         get_migration_scripts_from_dir(
             get_version_from_embedded_extension_config()?,
             &MIGRATION_SCRIPTS,

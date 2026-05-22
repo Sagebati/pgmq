@@ -84,10 +84,10 @@ async fn main() -> Result<(), PgmqError> {
 
             match args.command {
                 InstallCommands::InitMigrationsTable(args) => {
-                    pgmq::install::init_migrations_table(&pool, args.version).await?;
+                    pgmq::install::sqlx::init_migrations_table(&pool, args.version).await?;
                 }
                 InstallCommands::InstalledVersion => {
-                    let version = pgmq::install::installed_version(&pool).await?;
+                    let version = pgmq::install::sqlx::installed_version(&pool).await?;
                     if let Some(version) = version {
                         log::info!("Installed version: {version}");
                     } else {
@@ -95,10 +95,11 @@ async fn main() -> Result<(), PgmqError> {
                     }
                 }
                 InstallCommands::InstallFromGithub(args) => {
-                    pgmq::install::install_sql_from_github(&pool, args.version.as_deref()).await?;
+                    pgmq::install::sqlx::install_sql_from_github(&pool, args.version.as_deref())
+                        .await?;
                 }
                 InstallCommands::InstallFromEmbedded => {
-                    pgmq::install::install_sql_from_embedded(&pool).await?;
+                    pgmq::install::sqlx::install_sql_from_embedded(&pool).await?;
                 }
             }
         }

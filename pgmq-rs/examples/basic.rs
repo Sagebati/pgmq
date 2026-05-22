@@ -1,35 +1,41 @@
+use pgmq::pg_ext::VisibilityTimeoutOffset;
 use pgmq::{errors::PgmqError, Message, PGMQueueExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sqlx::PgPool;
 
 #[tokio::main]
 async fn main() -> Result<(), PgmqError> {
-    // Initialize a connection to Postgres
+    // Initialize a connection to Postgres.
     println!("Connecting to Postgres");
-    let queue: PGMQueueExt =
-        PGMQueueExt::new("postgres://postgres:postgres@0.0.0.0:5432".to_owned(), 2)
-            .await
-            .expect("Failed to connect to postgres");
-
-    // Create a queue
-    println!("Creating a queue 'my_queue'");
-    let my_queue = "my_basic_queue".to_owned();
-    queue
-        .create(&my_queue)
+    let pool = PgPool::connect("postgres://postgres:postgres@0.0.0.0:5432")
         .await
-        .expect("Failed to create queue");
+        .expect("Failed to connect to postgres");
 
-    // Send a message as JSON
-    let json_message = serde_json::json!({
-        "foo": "bar"
-    });
+    // One-time install of pgmq into the database.
+    #[cfg(feature = "install-sql-embedded")]
+    pgmq::install::sqlx::install_sql_from_embedded(&pool)
+        .await
+        .expect("Failed to install pgmq");
+
+    // Acquire a connection from the pool. pgmq's queue API is implemented on
+    // `&mut PgConnection`, not on `PgPool` — bring your own pool semantics.
+    let mut conn = pool.acquire().await.expect("acquire");
+
+    // Create a queue.
+    println!("Creating a queue 'my_basic_queue'");
+    let my_queue = "my_basic_queue";
+    conn.create(my_queue).await.expect("Failed to create queue");
+
+    // Send a message as JSON.
+    let json_message = serde_json::json!({ "foo": "bar" });
     println!("Enqueueing a JSON message: {json_message}");
-    let json_message_id: i64 = queue
-        .send(&my_queue, &json_message)
+    let json_message_id: i64 = conn
+        .send(my_queue, &json_message)
         .await
         .expect("Failed to enqueue message");
 
-    // Messages can also be sent from structs
+    // Messages can also be sent from structs.
     #[derive(Serialize, Debug, Deserialize)]
     struct MyMessage {
         foo: String,
@@ -38,54 +44,40 @@ async fn main() -> Result<(), PgmqError> {
         foo: "bar".to_owned(),
     };
     println!("Enqueueing a struct message: {struct_message:?}");
-    let struct_message_id: i64 = queue
-        .send(&my_queue, &struct_message)
+    let struct_message_id: i64 = conn
+        .send(my_queue, &struct_message)
         .await
         .expect("Failed to enqueue message");
 
-    // Use a visibility timeout of 30 seconds.
-    //
-    // Messages that are not deleted within the
-    // visibility timeout will return to the queue.
-    let visibility_timeout_seconds: i32 = 30;
+    let vt = VisibilityTimeoutOffset::seconds(30);
 
-    // Read the JSON message
-    let received_json_message: Message<Value> = queue
-        .read::<Value>(&my_queue, visibility_timeout_seconds)
+    let received_json_message: Message<Value> = conn
+        .read(my_queue, vt)
         .await
         .unwrap()
         .expect("No messages in the queue");
     println!("Received a message: {received_json_message:?}");
-
-    // Compare message IDs
     assert_eq!(received_json_message.msg_id, json_message_id);
 
-    // Read the struct message
-    let received_struct_message: Message<MyMessage> = queue
-        .read::<MyMessage>(&my_queue, visibility_timeout_seconds)
+    let received_struct_message: Message<MyMessage> = conn
+        .read(my_queue, vt)
         .await
         .unwrap()
         .expect("No messages in the queue");
     println!("Received a message: {received_struct_message:?}");
-
     assert_eq!(received_struct_message.msg_id, struct_message_id);
 
-    // Delete the messages to remove them from the queue
-    let _ = queue
-        .delete(&my_queue, received_json_message.msg_id)
+    let _ = conn
+        .delete(my_queue, received_json_message.msg_id)
         .await
         .expect("Failed to delete message");
-    let _ = queue
-        .delete(&my_queue, received_struct_message.msg_id)
+    let _ = conn
+        .delete(my_queue, received_struct_message.msg_id)
         .await
         .expect("Failed to delete message");
     println!("Deleted the messages from the queue");
 
-    // No messages are remaining
-    let no_message: Option<Message<Value>> = queue
-        .read::<Value>(&my_queue, visibility_timeout_seconds)
-        .await
-        .unwrap();
+    let no_message: Option<Message<Value>> = conn.read(my_queue, vt).await.unwrap();
     assert!(no_message.is_none());
 
     Ok(())

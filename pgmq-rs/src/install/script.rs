@@ -1,10 +1,7 @@
-use crate::install::applied::AppliedMigration;
 use crate::install::install_err;
 use crate::install::version::Version;
 use crate::PgmqError;
-use futures_util::StreamExt;
 use regex::Regex;
-use sqlx::{Executor, Postgres, Transaction};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::str::FromStr;
@@ -82,24 +79,6 @@ pub trait ScriptFetcher {
 pub struct MigrationScript {
     pub name: ParsedScriptName,
     pub content: Cow<'static, str>,
-}
-
-impl MigrationScript {
-    /// Run this script and mark it as applied in the DB.
-    pub async fn run(&self, txn: &mut Transaction<'static, Postgres>) -> Result<(), PgmqError> {
-        {
-            let mut stream = txn.fetch_many(self.content.as_ref());
-            while let Some(step) = stream.next().await {
-                let _ = step?;
-            }
-        }
-
-        AppliedMigration::insert_script(&self.name)?
-            .execute(&mut **txn)
-            .await?;
-
-        Ok(())
-    }
 }
 
 impl PartialEq for MigrationScript {

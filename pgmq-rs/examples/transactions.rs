@@ -1,97 +1,117 @@
-use pgmq::{Message, PGMQueueExt};
+//! Demonstrates composing pgmq calls with a user-owned sqlx transaction.
+//!
+//! Run with:
+//!   cargo run --example transactions --features install-sql-embedded
+//!
+//! What this shows: the pattern "insert into my own table AND enqueue a message, atomically."
+//! Either both happen, or neither does.
+
+use pgmq::pg_ext::VisibilityTimeoutOffset;
+use pgmq::PGMQueueExt;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 
 #[derive(Serialize, Debug, Deserialize, Eq, PartialEq)]
-struct MyMessage {
-    foo: String,
-    num: u64,
+struct OrderShipped {
+    order_id: i64,
+    total_cents: i64,
 }
 
 #[tokio::main]
 async fn main() {
     let db_url = "postgres://postgres:postgres@localhost:5432/postgres";
-    let example_queue = "example_tx_queue";
+    let pool = PgPool::connect(db_url).await.expect("connect to postgres");
 
-    // regular postgres connection pool
-    let pool = PgPool::connect(&db_url)
+    #[cfg(feature = "install-sql-embedded")]
+    pgmq::install::sqlx::install_sql_from_embedded(&pool)
         .await
-        .expect("failed to connect to postgres");
-    // a separate pool is created in the queue
-    let queue: PGMQueueExt =
-        PGMQueueExt::new("postgres://postgres:postgres@0.0.0.0:5432".to_owned(), 2)
-            .await
-            .expect("Failed to connect to postgres");
+        .expect("install pgmq");
 
-    // Create the queue
-    queue
-        .create(&example_queue)
+    let queue = "shipping_events";
+    {
+        let mut conn = pool.acquire().await.expect("acquire");
+        let _ = conn.drop_queue(queue).await;
+        conn.create(queue).await.expect("create queue");
+    }
+
+    // The user's own table.
+    sqlx::query("CREATE TABLE IF NOT EXISTS orders (id BIGINT PRIMARY KEY, total_cents BIGINT NOT NULL, shipped BOOL NOT NULL DEFAULT false);")
+        .execute(&pool).await.expect("create orders");
+
+    // --- Successful path: open a tx, do our own work, send to pgmq, commit. ---
+    let mut tx = pool.begin().await.expect("begin");
+    sqlx::query("INSERT INTO orders (id, total_cents, shipped) VALUES ($1, $2, true) ON CONFLICT (id) DO UPDATE SET shipped = true, total_cents = EXCLUDED.total_cents;")
+        .bind(1001i64).bind(5000i64).execute(&mut *tx).await.expect("insert order");
+
+    // pgmq.send inside the same transaction — the trait impls on `&mut Transaction<'_, Postgres>`.
+    tx
+        .send(
+            queue,
+            &OrderShipped {
+                order_id: 1001,
+                total_cents: 5000,
+            },
+        )
         .await
-        .expect("Failed to create queue");
+        .expect("send via tx");
 
-    // start a transaction
-    let mut tx = pool.begin().await.expect("failed to start transaction");
-
-    // send message using the open transaction
-    let msg = MyMessage {
-        foo: "bar".to_owned(),
-        num: 42,
-    };
-    let sent = queue
-        .send_with_cxn(&example_queue, &msg, &mut *tx)
-        .await
-        .expect("failed to send message");
-    println!("message sent. id: {sent}, msg: {msg:?}");
-
-    // get row count from a new connection (not the transaction)
-    let rows = sqlx::query("SELECT queue_length FROM pgmq.metrics($1)")
-        .bind(example_queue)
+    // Before commit: the message is invisible from a fresh connection.
+    let len: i64 = sqlx::query("SELECT queue_length FROM pgmq.metrics($1)")
+        .bind(queue)
         .fetch_one(&pool)
         .await
-        .expect("failed to fetch row")
-        .get::<i64, usize>(0);
-    // queue empty because transaction not committed
-    assert_eq!(rows, 0);
-    println!("queue length: {rows}");
+        .expect("metrics")
+        .get(0);
+    println!("queue length before commit: {len}");
+    assert_eq!(len, 0);
 
-    // reading from queue returns no messages
-    let received: Option<Message<MyMessage>> = queue
-        .read(&example_queue, 10)
-        .await
-        .expect("failed to read message");
-    assert!(received.is_none());
+    tx.commit().await.expect("commit");
 
-    // commit the transaction
-    tx.commit().await.expect("failed to commit transaction");
-    println!("transaction committed");
-
-    let rows = sqlx::query("SELECT queue_length FROM pgmq.metrics($1)")
-        .bind(example_queue)
+    let len: i64 = sqlx::query("SELECT queue_length FROM pgmq.metrics($1)")
+        .bind(queue)
         .fetch_one(&pool)
         .await
-        .expect("failed to fetch row")
-        .get::<i64, usize>(0);
-    // queue empty because transaction not committed
-    assert_eq!(rows, 1);
-    println!("queue length: {rows}");
+        .expect("metrics")
+        .get(0);
+    println!("queue length after commit: {len}");
+    assert_eq!(len, 1);
 
-    // reading from queue returns no messages
-    let received: Message<MyMessage> = queue
-        .read(&example_queue, 10)
+    let mut conn = pool.acquire().await.expect("acquire");
+    let msg: pgmq::Message<OrderShipped> = conn
+        .read(queue, VisibilityTimeoutOffset::seconds(10))
         .await
-        .expect("failed to read message")
-        .expect("expected message");
+        .expect("read")
+        .expect("message present");
+    println!("got message: {msg:?}");
+    assert_eq!(msg.message.order_id, 1001);
+    conn.delete(queue, msg.msg_id).await.expect("delete");
 
-    // can now read the message because transaction was committed
-    assert!(received.msg_id == sent);
-    assert_eq!(received.message, msg);
-    println!(
-        "message received. id: {}, msg: {:?}",
-        received.msg_id, received.message
-    );
-
-    queue
-        .drop_queue(&example_queue)
+    // --- Failure path: if the user's work fails after pgmq.send inside a tx, the rollback
+    //     prevents the message from being persisted. ---
+    let mut tx = pool.begin().await.expect("begin 2");
+    tx
+        .send(
+            queue,
+            &OrderShipped {
+                order_id: 9999,
+                total_cents: 1,
+            },
+        )
         .await
-        .expect("failed to drop queue");
+        .expect("send via tx 2");
+    tx.rollback().await.expect("rollback");
+
+    let after_rollback_count: i64 = sqlx::query("SELECT queue_length FROM pgmq.metrics($1)")
+        .bind(queue)
+        .fetch_one(&pool)
+        .await
+        .expect("metrics 2")
+        .get(0);
+    println!("queue length after rollback: {after_rollback_count} (rolled-back send did not persist)");
+
+    conn.drop_queue(queue).await.expect("drop queue");
+    sqlx::query("DROP TABLE orders;")
+        .execute(&pool)
+        .await
+        .expect("drop orders");
 }

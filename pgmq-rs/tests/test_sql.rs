@@ -1,3 +1,7 @@
+#![cfg(feature = "sqlx")]
+
+use pgmq::pg_ext::VisibilityTimeoutOffset;
+use pgmq::PGMQueueExt;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -35,22 +39,27 @@ async fn test_sql_lifecycle() {
         .await
         .unwrap();
 
-    let queue = pgmq::PGMQueueExt::new(test_db_url, 1).await.unwrap();
-    #[cfg(feature = "install-sql-embedded")]
-    queue.install_sql_from_embedded().await.unwrap();
-    queue.create(&test_queue).await.unwrap();
+    let pool = PgPool::connect(&test_db_url).await.unwrap();
+    pgmq::install::sqlx::install_sql_from_embedded(&pool)
+        .await
+        .unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    conn.create(&test_queue).await.unwrap();
 
     let sent_msg = MyMessage::default();
-    let msg_id = queue.send(&test_queue, &sent_msg).await.unwrap();
-    let read_msg = queue
-        .read::<MyMessage>(&test_queue, 30)
+    let msg_id = conn.send(&test_queue, &sent_msg).await.unwrap();
+    let read_msg = conn
+        .read::<MyMessage>(&test_queue, VisibilityTimeoutOffset::seconds(30))
         .await
         .unwrap()
         .unwrap();
     assert_eq!(msg_id, read_msg.msg_id);
     assert_eq!(sent_msg, read_msg.message);
-    queue.archive(&test_queue, msg_id).await.unwrap();
-    let read_none = queue.read::<MyMessage>(&test_queue, 30).await.unwrap();
+    conn.archive(&test_queue, msg_id).await.unwrap();
+    let read_none = conn
+        .read::<MyMessage>(&test_queue, VisibilityTimeoutOffset::seconds(30))
+        .await
+        .unwrap();
     assert!(read_none.is_none());
 }
 

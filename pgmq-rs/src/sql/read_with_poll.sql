@@ -1,0 +1,1 @@
+SELECT msg_id, read_ct, enqueued_at, vt, message from pgmq.read_with_poll(queue_name=>$1::text, vt=>$2::integer, qty=>$3::integer, max_poll_seconds=>$4::integer, poll_interval_ms=>$5::integer);

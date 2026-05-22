@@ -1,6 +1,5 @@
 //! Custom errors types for PGMQ
 use thiserror::Error;
-use url::ParseError;
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
@@ -9,13 +8,17 @@ pub enum PgmqError {
     #[error("json parsing error {0}")]
     JsonParsingError(#[from] serde_json::error::Error),
 
-    /// a url parsing error
-    #[error("url parsing error {0}")]
-    UrlParsingError(#[from] ParseError),
+    /// a database error returned by the underlying driver
+    #[error("database error: {0}")]
+    DatabaseError(String),
 
-    /// a database error
-    #[error("database error {0}")]
-    DatabaseError(#[from] sqlx::Error),
+    /// a connection pool error returned by the underlying driver
+    #[error("pool error: {0}")]
+    PoolError(String),
+
+    /// failed to decode a column from a returned row
+    #[error("row decode error: column '{column}': {reason}")]
+    RowDecodeError { column: String, reason: String },
 
     /// a queue name error
     /// queue names must be alphanumeric and start with a letter
@@ -26,4 +29,11 @@ pub enum PgmqError {
     #[cfg(feature = "install-sql")]
     #[error("installation error: {0}")]
     InstallationError(String),
+}
+
+#[cfg(any(feature = "diesel-async", feature = "diesel-sync"))]
+impl From<diesel::result::Error> for PgmqError {
+    fn from(err: diesel::result::Error) -> Self {
+        PgmqError::DatabaseError(err.to_string())
+    }
 }
