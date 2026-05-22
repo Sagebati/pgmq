@@ -20,8 +20,7 @@ pub const READ_GROUPED: &str = include_str!("../sql/read_grouped.sql");
 pub const READ_GROUPED_WITH_POLL: &str = include_str!("../sql/read_grouped_with_poll.sql");
 pub const READ_GROUPED_HEAD: &str = include_str!("../sql/read_grouped_head.sql");
 pub const READ_GROUPED_RR: &str = include_str!("../sql/read_grouped_rr.sql");
-pub const READ_GROUPED_RR_WITH_POLL: &str =
-    include_str!("../sql/read_grouped_rr_with_poll.sql");
+pub const READ_GROUPED_RR_WITH_POLL: &str = include_str!("../sql/read_grouped_rr_with_poll.sql");
 
 pub const POP: &str = include_str!("../sql/pop.sql");
 

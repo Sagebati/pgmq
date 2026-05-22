@@ -37,9 +37,7 @@ pub fn serialize_optional_list<H: Serialize>(
 
 /// Validate a queue or topic name. Returns `Err(PgmqError::InvalidQueueName)` if it fails.
 pub fn check_input(input: &str) -> Result<(), PgmqError> {
-    let valid = input
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    let valid = input.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
         && !input.is_empty()
         && input.len() <= 48;
     if valid {

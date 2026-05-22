@@ -167,7 +167,6 @@ mod tests {
             */
             let scripts = list_all_scripts_in_dir(&MIGRATION_SCRIPTS)
                 .unwrap()
-                .into_iter()
                 .sorted()
                 .collect_vec();
 

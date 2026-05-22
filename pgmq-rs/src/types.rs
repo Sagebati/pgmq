@@ -14,7 +14,10 @@ pub const PGMQ_SCHEMA: &str = "pgmq";
 /// Metadata returned by `pgmq.list_queues()`.
 #[derive(Clone, Debug, Deserialize)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
-#[cfg_attr(any(feature = "diesel-async", feature = "diesel-sync"), derive(diesel::QueryableByName))]
+#[cfg_attr(
+    any(feature = "diesel-async", feature = "diesel-sync"),
+    derive(diesel::QueryableByName)
+)]
 pub struct PGMQueueMeta {
     #[cfg_attr(any(feature = "diesel-async", feature = "diesel-sync"), diesel(sql_type = diesel::sql_types::Text))]
     pub queue_name: String,
@@ -44,7 +47,10 @@ pub struct Message<T = serde_json::Value> {
 /// A row returned by `pgmq.send_batch_topic`.
 #[derive(Clone, Debug, Deserialize)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
-#[cfg_attr(any(feature = "diesel-async", feature = "diesel-sync"), derive(diesel::QueryableByName))]
+#[cfg_attr(
+    any(feature = "diesel-async", feature = "diesel-sync"),
+    derive(diesel::QueryableByName)
+)]
 #[non_exhaustive]
 pub struct SendBatchTopicRow {
     #[cfg_attr(any(feature = "diesel-async", feature = "diesel-sync"), diesel(sql_type = diesel::sql_types::Text))]
@@ -56,7 +62,10 @@ pub struct SendBatchTopicRow {
 /// A row returned by `pgmq.list_topic_bindings`.
 #[derive(Clone, Debug, Deserialize)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
-#[cfg_attr(any(feature = "diesel-async", feature = "diesel-sync"), derive(diesel::QueryableByName))]
+#[cfg_attr(
+    any(feature = "diesel-async", feature = "diesel-sync"),
+    derive(diesel::QueryableByName)
+)]
 #[non_exhaustive]
 pub struct ListTopicBindingsRow {
     #[cfg_attr(any(feature = "diesel-async", feature = "diesel-sync"), diesel(sql_type = diesel::sql_types::Text))]
@@ -72,7 +81,10 @@ pub struct ListTopicBindingsRow {
 /// A row returned by `pgmq.list_notify_insert_throttles`.
 #[derive(Clone, Debug, Deserialize)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
-#[cfg_attr(any(feature = "diesel-async", feature = "diesel-sync"), derive(diesel::QueryableByName))]
+#[cfg_attr(
+    any(feature = "diesel-async", feature = "diesel-sync"),
+    derive(diesel::QueryableByName)
+)]
 #[non_exhaustive]
 pub struct ListNotifyInsertThrottlesRow {
     #[cfg_attr(any(feature = "diesel-async", feature = "diesel-sync"), diesel(sql_type = diesel::sql_types::Text))]
@@ -86,7 +98,10 @@ pub struct ListNotifyInsertThrottlesRow {
 /// Metrics for a queue, returned by `pgmq.metrics` / `pgmq.metrics_all`.
 #[derive(Clone, Debug, Deserialize)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
-#[cfg_attr(any(feature = "diesel-async", feature = "diesel-sync"), derive(diesel::QueryableByName))]
+#[cfg_attr(
+    any(feature = "diesel-async", feature = "diesel-sync"),
+    derive(diesel::QueryableByName)
+)]
 #[non_exhaustive]
 pub struct QueueMetrics {
     #[cfg_attr(any(feature = "diesel-async", feature = "diesel-sync"), diesel(sql_type = diesel::sql_types::Text))]

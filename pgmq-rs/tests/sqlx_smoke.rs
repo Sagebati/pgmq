@@ -89,10 +89,7 @@ async fn send_batch_and_metrics() {
             num: i,
         })
         .collect();
-    let ids = conn
-        .send_batch(&q, &messages)
-        .await
-        .expect("send_batch");
+    let ids = conn.send_batch(&q, &messages).await.expect("send_batch");
     assert_eq!(ids.len(), 5);
 
     let metrics = conn.metrics(&q).await.expect("metrics");
@@ -106,10 +103,7 @@ async fn send_batch_and_metrics() {
         .expect("read_batch");
     assert_eq!(read.len(), 5);
 
-    let n_deleted = conn
-        .delete_batch(&q, &ids)
-        .await
-        .expect("delete_batch");
+    let n_deleted = conn.delete_batch(&q, &ids).await.expect("delete_batch");
     assert_eq!(n_deleted, 5);
 
     conn.drop_queue(&q).await.expect("drop");
@@ -149,13 +143,11 @@ async fn pop_returns_and_removes() {
     };
     let _ = conn.send(&q, &msg).await.expect("send");
 
-    let popped: Option<pgmq::Message<MyMessage>> =
-        conn.pop(&q).await.expect("pop");
+    let popped: Option<pgmq::Message<MyMessage>> = conn.pop(&q).await.expect("pop");
     let popped = popped.expect("got a message");
     assert_eq!(popped.message, msg);
 
-    let again: Option<pgmq::Message<MyMessage>> =
-        conn.pop(&q).await.expect("pop 2");
+    let again: Option<pgmq::Message<MyMessage>> = conn.pop(&q).await.expect("pop 2");
     assert!(again.is_none());
 
     conn.drop_queue(&q).await.expect("drop");

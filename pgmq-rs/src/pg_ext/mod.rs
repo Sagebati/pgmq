@@ -65,7 +65,6 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 pub use visibility_timeout_offest::VisibilityTimeoutOffset;
 
-
 /// Queue API for the `pgmq` Postgres extension. Implemented natively by each driver adapter.
 /// Bring this trait into scope to call queue methods directly on your pool or transaction.
 #[async_trait]
@@ -224,8 +223,7 @@ pub trait PGMQueueExt {
 
     async fn archive(self, queue_name: &str, msg_id: i64) -> Result<bool, PgmqError>;
 
-    async fn archive_batch(self, queue_name: &str, msg_ids: &[i64])
-        -> Result<usize, PgmqError>;
+    async fn archive_batch(self, queue_name: &str, msg_ids: &[i64]) -> Result<usize, PgmqError>;
 
     async fn pop<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
@@ -234,8 +232,7 @@ pub trait PGMQueueExt {
 
     async fn delete(self, queue_name: &str, msg_id: i64) -> Result<bool, PgmqError>;
 
-    async fn delete_batch(self, queue_name: &str, msg_ids: &[i64])
-        -> Result<usize, PgmqError>;
+    async fn delete_batch(self, queue_name: &str, msg_ids: &[i64]) -> Result<usize, PgmqError>;
 
     async fn create_fifo_index(self, queue_name: &str) -> Result<(), PgmqError>;
     async fn create_fifo_indexes_all(self) -> Result<(), PgmqError>;

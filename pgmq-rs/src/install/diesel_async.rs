@@ -1,10 +1,10 @@
 //! diesel-async install/migration entry points. Each function uses diesel-async's
 //! `AsyncConnection::transaction(|conn| ...)` callback for multi-statement atomicity.
 
-use crate::errors::PgmqError;
-use crate::install::script::{ParsedScriptName, ScriptFetcher};
 use super::internal::*;
 use super::Version;
+use crate::errors::PgmqError;
+use crate::install::script::{ParsedScriptName, ScriptFetcher};
 use diesel::sql_types;
 use diesel::{sql_query, QueryableByName};
 use diesel_async::pooled_connection::deadpool::Pool;
@@ -80,9 +80,7 @@ pub async fn install_sql_from_github(
 
 #[cfg(feature = "install-sql-embedded")]
 #[doc = include_str!("./embedded/install_sql_embedded.md")]
-pub async fn install_sql_from_embedded(
-    pool: &Pool<AsyncPgConnection>,
-) -> Result<(), PgmqError> {
+pub async fn install_sql_from_embedded(pool: &Pool<AsyncPgConnection>) -> Result<(), PgmqError> {
     install_sql(pool, embedded_fetcher()).await
 }
 
@@ -131,13 +129,9 @@ async fn create_migrations_table(conn: &mut AsyncPgConnection) -> Result<(), Pgm
     Ok(())
 }
 
-async fn fetch_applied(
-    conn: &mut AsyncPgConnection,
-) -> Result<Vec<AppliedMigration>, PgmqError> {
+async fn fetch_applied(conn: &mut AsyncPgConnection) -> Result<Vec<AppliedMigration>, PgmqError> {
     let rows: Vec<AppliedMigrationRow> =
-        sql_query(SELECT_APPLIED_MIGRATIONS_SQL)
-            .load(conn)
-            .await?;
+        sql_query(SELECT_APPLIED_MIGRATIONS_SQL).load(conn).await?;
     rows.into_iter()
         .map(|r| {
             Ok(AppliedMigration {

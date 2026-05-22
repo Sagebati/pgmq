@@ -5,10 +5,10 @@
 //! (which requires network I/O), use the async `diesel-async` adapter inside a small tokio
 //! runtime instead — pgmq doesn't ship a sync HTTP path.
 
-use crate::errors::PgmqError;
-use crate::install::script::ParsedScriptName;
 use super::internal::*;
 use super::Version;
+use crate::errors::PgmqError;
+use crate::install::script::ParsedScriptName;
 use diesel::connection::SimpleConnection;
 use diesel::pg::PgConnection;
 use diesel::{sql_query, sql_types, Connection, QueryableByName, RunQueryDsl};
@@ -79,8 +79,7 @@ fn create_migrations_table(conn: &mut PgConnection) -> Result<(), PgmqError> {
 }
 
 fn fetch_applied(conn: &mut PgConnection) -> Result<Vec<AppliedMigration>, PgmqError> {
-    let rows: Vec<AppliedMigrationRow> =
-        sql_query(SELECT_APPLIED_MIGRATIONS_SQL).load(conn)?;
+    let rows: Vec<AppliedMigrationRow> = sql_query(SELECT_APPLIED_MIGRATIONS_SQL).load(conn)?;
     rows.into_iter()
         .map(|r| {
             Ok(AppliedMigration {

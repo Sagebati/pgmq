@@ -3,10 +3,10 @@
 //! These take `&mut tokio_postgres::Client` — bring your own pool, acquire a client, then
 //! pass it in. The installer opens its own transaction internally for atomicity.
 
-use crate::errors::PgmqError;
-use crate::install::script::{ParsedScriptName, ScriptFetcher};
 use super::internal::*;
 use super::Version;
+use crate::errors::PgmqError;
+use crate::install::script::{ParsedScriptName, ScriptFetcher};
 use std::str::FromStr;
 use tokio_postgres::{Client, Transaction};
 
@@ -20,10 +20,7 @@ pub async fn init(client: &mut Client) -> Result<(), PgmqError> {
 }
 
 #[doc = include_str!("init_migrations_table.md")]
-pub async fn init_migrations_table(
-    client: &mut Client,
-    version: Version,
-) -> Result<(), PgmqError> {
+pub async fn init_migrations_table(client: &mut Client, version: Version) -> Result<(), PgmqError> {
     let tx = client.transaction().await?;
     create_migrations_table(&tx).await?;
     if !fetch_applied(&tx).await?.is_empty() {
@@ -89,9 +86,7 @@ async fn create_migrations_table(tx: &Transaction<'_>) -> Result<(), PgmqError> 
 }
 
 async fn fetch_applied(tx: &Transaction<'_>) -> Result<Vec<AppliedMigration>, PgmqError> {
-    let rows = tx
-        .query(SELECT_APPLIED_MIGRATIONS_SQL, &[])
-        .await?;
+    let rows = tx.query(SELECT_APPLIED_MIGRATIONS_SQL, &[]).await?;
     rows.into_iter()
         .map(|r| {
             let name: String = r.try_get(0).map_err(|e| PgmqError::RowDecodeError {
@@ -110,15 +105,9 @@ async fn fetch_applied(tx: &Transaction<'_>) -> Result<Vec<AppliedMigration>, Pg
         .collect()
 }
 
-async fn insert_applied(
-    tx: &Transaction<'_>,
-    name: &ParsedScriptName,
-) -> Result<(), PgmqError> {
+async fn insert_applied(tx: &Transaction<'_>, name: &ParsedScriptName) -> Result<(), PgmqError> {
     let version = name.to.to_string();
-    tx.execute(
-        INSERT_APPLIED_MIGRATION_SQL,
-        &[&name.original, &version],
-    )
-    .await?;
+    tx.execute(INSERT_APPLIED_MIGRATION_SQL, &[&name.original, &version])
+        .await?;
     Ok(())
 }

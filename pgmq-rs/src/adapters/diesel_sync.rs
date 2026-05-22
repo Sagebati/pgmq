@@ -117,15 +117,17 @@
 //!
 //! [async]: crate::adapters::diesel_async
 
+use super::helpers::check_input;
+use super::helpers::{
+    poll_interval_to_ms, poll_timeout_to_secs, serialize_list, serialize_optional_list,
+};
+use super::query;
 use crate::errors::PgmqError;
 use crate::pg_ext::{PGMQueueExt, VisibilityTimeoutOffset};
-use super::helpers::{poll_interval_to_ms, poll_timeout_to_secs, serialize_list, serialize_optional_list};
-use super::query;
 use crate::types::{
     ListNotifyInsertThrottlesRow, ListTopicBindingsRow, Message, PGMQueueMeta, QueueMetrics,
     SendBatchTopicRow,
 };
-use super::helpers::check_input;
 use async_trait::async_trait;
 use diesel::pg::{Pg, PgConnection};
 use diesel::{sql_query, sql_types, OptionalExtension, QueryableByName, RunQueryDsl};
@@ -199,13 +201,17 @@ impl PGMQueueExt for &mut PgConnection {
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn create(self, queue_name: &str) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        sql_query(query::CREATE).bind::<sql_types::Text, _>(queue_name).execute(self)?;
+        sql_query(query::CREATE)
+            .bind::<sql_types::Text, _>(queue_name)
+            .execute(self)?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn create_unlogged(self, queue_name: &str) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        sql_query(query::CREATE_UNLOGGED).bind::<sql_types::Text, _>(queue_name).execute(self)?;
+        sql_query(query::CREATE_UNLOGGED)
+            .bind::<sql_types::Text, _>(queue_name)
+            .execute(self)?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -215,8 +221,12 @@ impl PGMQueueExt for &mut PgConnection {
         let row: ExistsCol = sql_query(query::CREATE_PARTITIONED_EXISTS_CHECK)
             .bind::<sql_types::Text, _>(queue_table)
             .get_result(&mut *self)?;
-        if row.exists { return Ok(false); }
-        sql_query(query::CREATE_PARTITIONED).bind::<sql_types::Text, _>(queue_name).execute(self)?;
+        if row.exists {
+            return Ok(false);
+        }
+        sql_query(query::CREATE_PARTITIONED)
+            .bind::<sql_types::Text, _>(queue_name)
+            .execute(self)?;
         Ok(true)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -230,28 +240,42 @@ impl PGMQueueExt for &mut PgConnection {
             partition_interval.is_some(),
             retention_interval.is_some(),
         );
-        let mut q = sql_query(sql).into_boxed::<Pg>().bind::<sql_types::Text, _>(table_name);
-        if let Some(p) = partition_interval { q = q.bind::<sql_types::Text, _>(p); }
-        if let Some(r) = retention_interval { q = q.bind::<sql_types::Text, _>(r); }
+        let mut q = sql_query(sql)
+            .into_boxed::<Pg>()
+            .bind::<sql_types::Text, _>(table_name);
+        if let Some(p) = partition_interval {
+            q = q.bind::<sql_types::Text, _>(p);
+        }
+        if let Some(r) = retention_interval {
+            q = q.bind::<sql_types::Text, _>(r);
+        }
         q.execute(self)?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn drop_queue(self, queue_name: &str) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        sql_query(query::DROP_QUEUE).bind::<sql_types::Text, _>(queue_name).execute(self)?;
+        sql_query(query::DROP_QUEUE)
+            .bind::<sql_types::Text, _>(queue_name)
+            .execute(self)?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn purge_queue(self, queue_name: &str) -> Result<i64, PgmqError> {
         check_input(queue_name)?;
-        let row: PurgeQueueCol = sql_query(query::PURGE_QUEUE).bind::<sql_types::Text, _>(queue_name).get_result(self)?;
+        let row: PurgeQueueCol = sql_query(query::PURGE_QUEUE)
+            .bind::<sql_types::Text, _>(queue_name)
+            .get_result(self)?;
         Ok(row.purge_queue)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn list_queues(self) -> Result<Option<Vec<PGMQueueMeta>>, PgmqError> {
         let rows: Vec<PGMQueueMeta> = sql_query(query::LIST_QUEUES).load(self)?;
-        if rows.is_empty() { Ok(None) } else { Ok(Some(rows)) }
+        if rows.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(rows))
+        }
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn set_vt<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
@@ -269,12 +293,23 @@ impl PGMQueueExt for &mut PgConnection {
         row.into_message()
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn send<T: Serialize + Send + Sync>(self, queue_name: &str, message: &T) -> Result<i64, PgmqError> {
-        self.send_delay(queue_name, message, VisibilityTimeoutOffset::seconds(0)).await
+    async fn send<T: Serialize + Send + Sync>(
+        self,
+        queue_name: &str,
+        message: &T,
+    ) -> Result<i64, PgmqError> {
+        self.send_delay(queue_name, message, VisibilityTimeoutOffset::seconds(0))
+            .await
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn send_delay<T: Serialize + Send + Sync>(self, queue_name: &str, message: &T, delay: VisibilityTimeoutOffset) -> Result<i64, PgmqError> {
-        self.send_delay_with_headers(queue_name, message, Option::<&()>::None, delay).await
+    async fn send_delay<T: Serialize + Send + Sync>(
+        self,
+        queue_name: &str,
+        message: &T,
+        delay: VisibilityTimeoutOffset,
+    ) -> Result<i64, PgmqError> {
+        self.send_delay_with_headers(queue_name, message, Option::<&()>::None, delay)
+            .await
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn send_delay_with_headers<T: Serialize + Send + Sync, H: Serialize + Send + Sync>(
@@ -286,7 +321,10 @@ impl PGMQueueExt for &mut PgConnection {
     ) -> Result<i64, PgmqError> {
         check_input(queue_name)?;
         let message = serde_json::to_value(message)?;
-        let headers = match headers { Some(h) => Some(serde_json::to_value(h)?), None => None };
+        let headers = match headers {
+            Some(h) => Some(serde_json::to_value(h)?),
+            None => None,
+        };
         let row: SendCol = sql_query(query::SEND)
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::Jsonb, _>(message)
@@ -296,15 +334,29 @@ impl PGMQueueExt for &mut PgConnection {
         Ok(row.send)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn send_batch<T: Serialize + Send + Sync>(self, queue_name: &str, messages: &[T]) -> Result<Vec<i64>, PgmqError> {
-        self.send_batch_with_delay(queue_name, messages, VisibilityTimeoutOffset::seconds(0)).await
+    async fn send_batch<T: Serialize + Send + Sync>(
+        self,
+        queue_name: &str,
+        messages: &[T],
+    ) -> Result<Vec<i64>, PgmqError> {
+        self.send_batch_with_delay(queue_name, messages, VisibilityTimeoutOffset::seconds(0))
+            .await
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn send_batch_with_delay<T: Serialize + Send + Sync>(self, queue_name: &str, messages: &[T], delay: VisibilityTimeoutOffset) -> Result<Vec<i64>, PgmqError> {
-        self.send_batch_with_delay_with_headers(queue_name, messages, Option::<&[()]>::None, delay).await
+    async fn send_batch_with_delay<T: Serialize + Send + Sync>(
+        self,
+        queue_name: &str,
+        messages: &[T],
+        delay: VisibilityTimeoutOffset,
+    ) -> Result<Vec<i64>, PgmqError> {
+        self.send_batch_with_delay_with_headers(queue_name, messages, Option::<&[()]>::None, delay)
+            .await
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn send_batch_with_delay_with_headers<T: Serialize + Send + Sync, H: Serialize + Send + Sync>(
+    async fn send_batch_with_delay_with_headers<
+        T: Serialize + Send + Sync,
+        H: Serialize + Send + Sync,
+    >(
         self,
         queue_name: &str,
         messages: &[T],
@@ -328,7 +380,11 @@ impl PGMQueueExt for &mut PgConnection {
         queue_name: &str,
         vt: VisibilityTimeoutOffset,
     ) -> Result<Option<Message<T>>, PgmqError> {
-        Ok(self.read_batch::<T>(queue_name, vt, 1).await?.into_iter().next())
+        Ok(self
+            .read_batch::<T>(queue_name, vt, 1)
+            .await?
+            .into_iter()
+            .next())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
@@ -353,7 +409,10 @@ impl PGMQueueExt for &mut PgConnection {
         pt: Option<std::time::Duration>,
         pi: Option<std::time::Duration>,
     ) -> Result<Option<Message<T>>, PgmqError> {
-        Ok(self.read_batch_with_poll::<T>(queue_name, vt, 1, pt, pi).await?.and_then(|v| v.into_iter().next()))
+        Ok(self
+            .read_batch_with_poll::<T>(queue_name, vt, 1, pt, pi)
+            .await?
+            .and_then(|v| v.into_iter().next()))
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn read_batch_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
@@ -374,7 +433,11 @@ impl PGMQueueExt for &mut PgConnection {
             .bind::<sql_types::Integer, _>(pt)
             .bind::<sql_types::Integer, _>(pi)
             .load(self)?;
-        Ok(Some(rows.into_iter().map(MessageRowJson::into_message).collect::<Result<Vec<_>, _>>()?))
+        Ok(Some(
+            rows.into_iter()
+                .map(MessageRowJson::into_message)
+                .collect::<Result<Vec<_>, _>>()?,
+        ))
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
@@ -489,7 +552,8 @@ impl PGMQueueExt for &mut PgConnection {
         check_input(queue_name)?;
         let row: Option<MessageRowJson> = sql_query(query::POP)
             .bind::<sql_types::Text, _>(queue_name)
-            .get_result(self).optional()?;
+            .get_result(self)
+            .optional()?;
         match row {
             Some(r) => Ok(Some(r.into_message()?)),
             None => Ok(None),
@@ -513,7 +577,9 @@ impl PGMQueueExt for &mut PgConnection {
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn create_fifo_index(self, queue_name: &str) -> Result<(), PgmqError> {
-        sql_query(query::CREATE_FIFO_INDEX).bind::<sql_types::Text, _>(queue_name).execute(self)?;
+        sql_query(query::CREATE_FIFO_INDEX)
+            .bind::<sql_types::Text, _>(queue_name)
+            .execute(self)?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -524,18 +590,29 @@ impl PGMQueueExt for &mut PgConnection {
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn bind_topic(self, pattern: &str, queue_name: &str) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        sql_query(query::BIND_TOPIC).bind::<sql_types::Text, _>(pattern).bind::<sql_types::Text, _>(queue_name).execute(self)?;
+        sql_query(query::BIND_TOPIC)
+            .bind::<sql_types::Text, _>(pattern)
+            .bind::<sql_types::Text, _>(queue_name)
+            .execute(self)?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn unbind_topic(self, pattern: &str, queue_name: &str) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        sql_query(query::UNBIND_TOPIC).bind::<sql_types::Text, _>(pattern).bind::<sql_types::Text, _>(queue_name).execute(self)?;
+        sql_query(query::UNBIND_TOPIC)
+            .bind::<sql_types::Text, _>(pattern)
+            .bind::<sql_types::Text, _>(queue_name)
+            .execute(self)?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn list_topic_bindings(self, queue_name: &str) -> Result<Vec<ListTopicBindingsRow>, PgmqError> {
-        Ok(sql_query(query::LIST_TOPIC_BINDINGS).bind::<sql_types::Text, _>(queue_name).load(self)?)
+    async fn list_topic_bindings(
+        self,
+        queue_name: &str,
+    ) -> Result<Vec<ListTopicBindingsRow>, PgmqError> {
+        Ok(sql_query(query::LIST_TOPIC_BINDINGS)
+            .bind::<sql_types::Text, _>(queue_name)
+            .load(self)?)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn list_topic_bindings_all(self) -> Result<Vec<ListTopicBindingsRow>, PgmqError> {
@@ -550,7 +627,10 @@ impl PGMQueueExt for &mut PgConnection {
         delay: VisibilityTimeoutOffset,
     ) -> Result<i32, PgmqError> {
         let message = serde_json::to_value(message)?;
-        let headers = match headers { Some(h) => Some(serde_json::to_value(h)?), None => None };
+        let headers = match headers {
+            Some(h) => Some(serde_json::to_value(h)?),
+            None => None,
+        };
         let row: SendTopicCol = sql_query(query::SEND_TOPIC)
             .bind::<sql_types::Text, _>(routing_key)
             .bind::<sql_types::Jsonb, _>(message)
@@ -577,7 +657,11 @@ impl PGMQueueExt for &mut PgConnection {
             .load(self)?)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn enable_notify_insert(self, queue_name: &str, throttle: std::time::Duration) -> Result<(), PgmqError> {
+    async fn enable_notify_insert(
+        self,
+        queue_name: &str,
+        throttle: std::time::Duration,
+    ) -> Result<(), PgmqError> {
         check_input(queue_name)?;
         let ms = i32::try_from(throttle.as_millis()).unwrap_or(i32::MAX);
         sql_query(query::ENABLE_NOTIFY_INSERT)
@@ -589,11 +673,17 @@ impl PGMQueueExt for &mut PgConnection {
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn disable_notify_insert(self, queue_name: &str) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        sql_query(query::DISABLE_NOTIFY_INSERT).bind::<sql_types::Text, _>(queue_name).execute(self)?;
+        sql_query(query::DISABLE_NOTIFY_INSERT)
+            .bind::<sql_types::Text, _>(queue_name)
+            .execute(self)?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn update_notify_insert(self, queue_name: &str, throttle: std::time::Duration) -> Result<(), PgmqError> {
+    async fn update_notify_insert(
+        self,
+        queue_name: &str,
+        throttle: std::time::Duration,
+    ) -> Result<(), PgmqError> {
         check_input(queue_name)?;
         let ms = i32::try_from(throttle.as_millis()).unwrap_or(i32::MAX);
         sql_query(query::UPDATE_NOTIFY_INSERT)
@@ -603,13 +693,17 @@ impl PGMQueueExt for &mut PgConnection {
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn list_notify_insert_throttles(self) -> Result<Vec<ListNotifyInsertThrottlesRow>, PgmqError> {
+    async fn list_notify_insert_throttles(
+        self,
+    ) -> Result<Vec<ListNotifyInsertThrottlesRow>, PgmqError> {
         Ok(sql_query(query::LIST_NOTIFY_INSERT_THROTTLES).load(self)?)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn metrics(self, queue_name: &str) -> Result<QueueMetrics, PgmqError> {
         check_input(queue_name)?;
-        Ok(sql_query(query::METRICS).bind::<sql_types::Text, _>(queue_name).get_result(self)?)
+        Ok(sql_query(query::METRICS)
+            .bind::<sql_types::Text, _>(queue_name)
+            .get_result(self)?)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn metrics_all(self) -> Result<Vec<QueueMetrics>, PgmqError> {

@@ -46,7 +46,7 @@ fn unique_queue_name(prefix: &str) -> String {
 async fn pool() -> Pool {
     let pool = pool_from_env();
     let mut client = pool.get().await.expect("get client");
-    pgmq::install::tokio_postgres::install_sql_from_embedded(&mut **client)
+    pgmq::install::tokio_postgres::install_sql_from_embedded(&mut client)
         .await
         .expect("install pgmq");
     pool
@@ -104,10 +104,7 @@ async fn send_batch_and_metrics() {
             num: i,
         })
         .collect();
-    let ids = client
-        .send_batch(&q, &messages)
-        .await
-        .expect("send_batch");
+    let ids = client.send_batch(&q, &messages).await.expect("send_batch");
     assert_eq!(ids.len(), 5);
 
     let metrics = client.metrics(&q).await.expect("metrics");

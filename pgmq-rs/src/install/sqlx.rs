@@ -1,10 +1,10 @@
 //! sqlx-native install/migration entry points. Each function opens a transaction on the
 //! provided `sqlx::PgPool` and uses sqlx directly — no abstraction layer.
 
-use crate::errors::PgmqError;
-use crate::install::script::{ParsedScriptName, ScriptFetcher};
 use super::internal::*;
 use super::Version;
+use crate::errors::PgmqError;
+use crate::install::script::{ParsedScriptName, ScriptFetcher};
 use sqlx::{PgPool, Postgres, Transaction};
 use std::str::FromStr;
 
@@ -93,10 +93,9 @@ async fn create_migrations_table(tx: &mut Transaction<'static, Postgres>) -> Res
 async fn fetch_applied(
     tx: &mut Transaction<'static, Postgres>,
 ) -> Result<Vec<AppliedMigration>, PgmqError> {
-    let rows: Vec<(String, String)> =
-        sqlx::query_as(SELECT_APPLIED_MIGRATIONS_SQL)
-            .fetch_all(&mut **tx)
-            .await?;
+    let rows: Vec<(String, String)> = sqlx::query_as(SELECT_APPLIED_MIGRATIONS_SQL)
+        .fetch_all(&mut **tx)
+        .await?;
     rows.into_iter()
         .map(|(name, ver)| {
             Ok(AppliedMigration {

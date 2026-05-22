@@ -33,8 +33,7 @@ async fn main() {
         .unwrap();
 
     let mut conn = pool.acquire().await.expect("acquire");
-    conn
-        .create("my_queue")
+    conn.create("my_queue")
         .await
         .expect("failed to create queue");
 
@@ -42,8 +41,7 @@ async fn main() {
         foo: "hello".to_string(),
         num: 42,
     };
-    conn
-        .send("my_queue", &msg)
+    conn.send("my_queue", &msg)
         .await
         .expect("failed to send message");
     let received: Message<MyMessage> = conn

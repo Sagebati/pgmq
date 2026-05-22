@@ -35,7 +35,7 @@ async fn main() {
     // One-time install via the tokio-postgres install module — pass a borrowed client.
     {
         let mut client = pool.get().await.expect("get client for install");
-        pgmq::install::tokio_postgres::install_sql_from_embedded(&mut **client)
+        pgmq::install::tokio_postgres::install_sql_from_embedded(&mut client)
             .await
             .expect("install");
     }
@@ -71,9 +71,12 @@ async fn main() {
     )
     .await
     .unwrap();
-    tx.execute("INSERT INTO _example_marker (note) VALUES ($1);", &[&"hello"])
-        .await
-        .unwrap();
+    tx.execute(
+        "INSERT INTO _example_marker (note) VALUES ($1);",
+        &[&"hello"],
+    )
+    .await
+    .unwrap();
     let id2 = tx
         .send(
             queue,

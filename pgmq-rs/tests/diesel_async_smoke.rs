@@ -95,10 +95,7 @@ async fn send_batch_and_metrics() {
             num: i,
         })
         .collect();
-    let ids = conn
-        .send_batch(&q, &messages)
-        .await
-        .expect("send_batch");
+    let ids = conn.send_batch(&q, &messages).await.expect("send_batch");
     assert_eq!(ids.len(), 5);
 
     let metrics = conn.metrics(&q).await.expect("metrics");
@@ -125,10 +122,14 @@ async fn pgmq_inside_user_transaction() {
     let id: i64 = conn
         .transaction::<_, pgmq::PgmqError, _>(|conn| {
             async move {
-                diesel::sql_query("CREATE TEMP TABLE IF NOT EXISTS _diesel_smoke_marker (note TEXT);")
-                    .execute(conn).await?;
+                diesel::sql_query(
+                    "CREATE TEMP TABLE IF NOT EXISTS _diesel_smoke_marker (note TEXT);",
+                )
+                .execute(conn)
+                .await?;
                 diesel::sql_query("INSERT INTO _diesel_smoke_marker (note) VALUES ('hello');")
-                    .execute(conn).await?;
+                    .execute(conn)
+                    .await?;
                 let id = conn.send(&q_clone, &msg_clone).await?;
                 Ok(id)
             }

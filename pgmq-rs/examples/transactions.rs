@@ -44,16 +44,15 @@ async fn main() {
         .bind(1001i64).bind(5000i64).execute(&mut *tx).await.expect("insert order");
 
     // pgmq.send inside the same transaction — the trait impls on `&mut Transaction<'_, Postgres>`.
-    tx
-        .send(
-            queue,
-            &OrderShipped {
-                order_id: 1001,
-                total_cents: 5000,
-            },
-        )
-        .await
-        .expect("send via tx");
+    tx.send(
+        queue,
+        &OrderShipped {
+            order_id: 1001,
+            total_cents: 5000,
+        },
+    )
+    .await
+    .expect("send via tx");
 
     // Before commit: the message is invisible from a fresh connection.
     let len: i64 = sqlx::query("SELECT queue_length FROM pgmq.metrics($1)")
@@ -89,16 +88,15 @@ async fn main() {
     // --- Failure path: if the user's work fails after pgmq.send inside a tx, the rollback
     //     prevents the message from being persisted. ---
     let mut tx = pool.begin().await.expect("begin 2");
-    tx
-        .send(
-            queue,
-            &OrderShipped {
-                order_id: 9999,
-                total_cents: 1,
-            },
-        )
-        .await
-        .expect("send via tx 2");
+    tx.send(
+        queue,
+        &OrderShipped {
+            order_id: 9999,
+            total_cents: 1,
+        },
+    )
+    .await
+    .expect("send via tx 2");
     tx.rollback().await.expect("rollback");
 
     let after_rollback_count: i64 = sqlx::query("SELECT queue_length FROM pgmq.metrics($1)")
@@ -107,7 +105,9 @@ async fn main() {
         .await
         .expect("metrics 2")
         .get(0);
-    println!("queue length after rollback: {after_rollback_count} (rolled-back send did not persist)");
+    println!(
+        "queue length after rollback: {after_rollback_count} (rolled-back send did not persist)"
+    );
 
     conn.drop_queue(queue).await.expect("drop queue");
     sqlx::query("DROP TABLE orders;")
