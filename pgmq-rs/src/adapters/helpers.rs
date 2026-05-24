@@ -13,11 +13,15 @@ pub const DEFAULT_POLL_TIMEOUT_S: i32 = 5;
 pub const DEFAULT_POLL_INTERVAL_MS: i32 = 250;
 
 pub fn poll_timeout_to_secs(d: Option<std::time::Duration>) -> i32 {
-    d.map_or(DEFAULT_POLL_TIMEOUT_S, |t| t.as_secs() as i32)
+    d.map_or(DEFAULT_POLL_TIMEOUT_S, |t| {
+        i32::try_from(t.as_secs()).unwrap_or(i32::MAX)
+    })
 }
 
 pub fn poll_interval_to_ms(d: Option<std::time::Duration>) -> i32 {
-    d.map_or(DEFAULT_POLL_INTERVAL_MS, |i| i.as_millis() as i32)
+    d.map_or(DEFAULT_POLL_INTERVAL_MS, |i| {
+        i32::try_from(i.as_millis()).unwrap_or(i32::MAX)
+    })
 }
 
 pub fn serialize_list<T: Serialize>(

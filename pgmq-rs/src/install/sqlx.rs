@@ -12,7 +12,7 @@ use std::str::FromStr;
 /// uses a transaction-scoped advisory lock to safely handle concurrent callers.
 pub async fn init(pool: &PgPool) -> Result<(), PgmqError> {
     let mut tx = pool.begin().await?;
-    sqlx::raw_sql(INIT_SQL).execute(&mut *tx).await?;
+    sqlx::raw_sql(&init_sql()).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -84,7 +84,7 @@ async fn install_sql(pool: &PgPool, script_fetcher: impl ScriptFetcher) -> Resul
 }
 
 async fn create_migrations_table(tx: &mut Transaction<'static, Postgres>) -> Result<(), PgmqError> {
-    sqlx::raw_sql(SETUP_MIGRATIONS_TABLE_SQL)
+    sqlx::raw_sql(&setup_migrations_table_sql())
         .execute(&mut **tx)
         .await?;
     Ok(())

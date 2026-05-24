@@ -1,6 +1,6 @@
 //! # tokio-postgres adapter
 //!
-//! Implements [`crate::PGMQueueExt`] for:
+//! Implements [`crate::PgMQConnExt`] for:
 //! - [`&tokio_postgres::Client`](tokio_postgres::Client) — a client (typically acquired from a pool)
 //! - [`&tokio_postgres::Transaction<'_>`](tokio_postgres::Transaction) — a user-managed transaction
 //!
@@ -52,7 +52,7 @@
 //! Acquire a client from your pool and call pgmq methods on it.
 //!
 //! ```ignore
-//! use pgmq::PGMQueueExt;
+//! use pgmq::PgMQConnExt;
 //! use pgmq::pg_ext::VisibilityTimeoutOffset;
 //!
 //! let client = pool.get().await?;        // e.g. deadpool_postgres::Client — derefs to &Client
@@ -68,7 +68,7 @@
 //! Compose pgmq with your own SQL atomically:
 //!
 //! ```ignore
-//! use pgmq::PGMQueueExt;
+//! use pgmq::PgMQConnExt;
 //!
 //! let mut client = pool.get().await?;
 //! let tx = client.transaction().await?;
@@ -101,7 +101,7 @@ use super::helpers::{
 };
 use super::query;
 use crate::errors::PgmqError;
-use crate::pg_ext::{PGMQueueExt, VisibilityTimeoutOffset};
+use crate::pg_ext::{PgMQConnExt, VisibilityTimeoutOffset};
 use crate::types::{
     ListNotifyInsertThrottlesRow, ListTopicBindingsRow, Message, PGMQueueMeta, QueueMetrics,
     SendBatchTopicRow,
@@ -302,10 +302,10 @@ mod imp {
         c: &C,
         queue_name: &str,
         msg_id: i64,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Message<T>, PgmqError> {
         check_input(queue_name)?;
-        let vt_secs = vt.as_seconds();
+        let vt_secs = vt.into().as_seconds();
         let row = c
             .query_one(query::SET_VT, &[&queue_name, &msg_id, &vt_secs])
             .await?;
@@ -322,7 +322,7 @@ mod imp {
         queue_name: &str,
         message: &T,
         headers: Option<&H>,
-        delay: VisibilityTimeoutOffset,
+        delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<i64, PgmqError> {
         check_input(queue_name)?;
         let message = serde_json::to_value(message)?;
@@ -330,7 +330,7 @@ mod imp {
             Some(h) => Some(serde_json::to_value(h)?),
             None => None,
         };
-        let delay_secs = delay.as_seconds();
+        let delay_secs = delay.into().as_seconds();
         let row = c
             .query_one(query::SEND, &[&queue_name, &message, &headers, &delay_secs])
             .await?;
@@ -346,12 +346,12 @@ mod imp {
         queue_name: &str,
         messages: &[T],
         headers: Option<&[H]>,
-        delay: VisibilityTimeoutOffset,
+        delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Vec<i64>, PgmqError> {
         check_input(queue_name)?;
         let messages = serialize_list(messages)?;
         let headers = serialize_optional_list(headers)?;
-        let delay_secs = delay.as_seconds();
+        let delay_secs = delay.into().as_seconds();
         let rows = c
             .query(
                 query::SEND_BATCH,
@@ -370,11 +370,11 @@ mod imp {
     >(
         c: &C,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let vt_secs = vt.as_seconds();
+        let vt_secs = vt.into().as_seconds();
         let rows = c.query(query::READ, &[&queue_name, &vt_secs, &qty]).await?;
         rows.iter()
             .map(Message::<T>::from_tokio_postgres_row)
@@ -388,13 +388,13 @@ mod imp {
     >(
         c: &C,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         max_batch_size: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let vt_secs = vt.as_seconds();
+        let vt_secs = vt.into().as_seconds();
         let pt = poll_timeout_to_secs(poll_timeout);
         let pi = poll_interval_to_ms(poll_interval);
         let rows = c
@@ -415,11 +415,11 @@ mod imp {
     >(
         c: &C,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let vt_secs = vt.as_seconds();
+        let vt_secs = vt.into().as_seconds();
         let rows = c
             .query(query::READ_GROUPED, &[&queue_name, &vt_secs, &qty])
             .await?;
@@ -434,13 +434,13 @@ mod imp {
     >(
         c: &C,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let vt_secs = vt.as_seconds();
+        let vt_secs = vt.into().as_seconds();
         let pt = poll_timeout_to_secs(poll_timeout);
         let pi = poll_interval_to_ms(poll_interval);
         let rows = c
@@ -460,11 +460,11 @@ mod imp {
     >(
         c: &C,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let vt_secs = vt.as_seconds();
+        let vt_secs = vt.into().as_seconds();
         let rows = c
             .query(query::READ_GROUPED_HEAD, &[&queue_name, &vt_secs, &qty])
             .await?;
@@ -479,11 +479,11 @@ mod imp {
     >(
         c: &C,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let vt_secs = vt.as_seconds();
+        let vt_secs = vt.into().as_seconds();
         let rows = c
             .query(query::READ_GROUPED_RR, &[&queue_name, &vt_secs, &qty])
             .await?;
@@ -498,13 +498,13 @@ mod imp {
     >(
         c: &C,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let vt_secs = vt.as_seconds();
+        let vt_secs = vt.into().as_seconds();
         let pt = poll_timeout_to_secs(poll_timeout);
         let pi = poll_interval_to_ms(poll_interval);
         let rows = c
@@ -560,8 +560,9 @@ mod imp {
         queue_name: &str,
         msg_id: i64,
     ) -> Result<bool, PgmqError> {
+        check_input(queue_name)?;
         let row = c.query_one(query::DELETE, &[&queue_name, &msg_id]).await?;
-        Ok(row.try_get("delete")?)
+        Ok(row.try_get("was_deleted")?)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn delete_batch<C: GenericClient + Sync>(
@@ -569,6 +570,7 @@ mod imp {
         queue_name: &str,
         msg_ids: &[i64],
     ) -> Result<usize, PgmqError> {
+        check_input(queue_name)?;
         let rows = c
             .query(query::DELETE_BATCH, &[&queue_name, &msg_ids])
             .await?;
@@ -580,6 +582,7 @@ mod imp {
         c: &C,
         queue_name: &str,
     ) -> Result<(), PgmqError> {
+        check_input(queue_name)?;
         c.execute(query::CREATE_FIFO_INDEX, &[&queue_name]).await?;
         Ok(())
     }
@@ -641,14 +644,14 @@ mod imp {
         routing_key: &str,
         message: &T,
         headers: Option<&H>,
-        delay: VisibilityTimeoutOffset,
+        delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<i32, PgmqError> {
         let message = serde_json::to_value(message)?;
         let headers = match headers {
             Some(h) => Some(serde_json::to_value(h)?),
             None => None,
         };
-        let delay_secs = delay.as_seconds();
+        let delay_secs = delay.into().as_seconds();
         let row = c
             .query_one(
                 query::SEND_TOPIC,
@@ -667,11 +670,11 @@ mod imp {
         routing_key: &str,
         messages: &[T],
         headers: Option<&[H]>,
-        delay: VisibilityTimeoutOffset,
+        delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Vec<SendBatchTopicRow>, PgmqError> {
         let messages = serialize_list(messages)?;
         let headers = serialize_optional_list(headers)?;
-        let delay_secs = delay.as_seconds();
+        let delay_secs = delay.into().as_seconds();
         let rows = c
             .query(
                 query::SEND_BATCH_TOPIC,
@@ -754,7 +757,7 @@ mod imp {
 macro_rules! impl_pgmq_for_client_source {
     ($target:ty, |$self:ident| $client:expr) => {
         #[async_trait]
-        impl PGMQueueExt for $target {
+        impl PgMQConnExt for $target {
             async fn create($self, queue_name: &str) -> Result<(), PgmqError> { imp::create($client, queue_name).await }
             async fn create_unlogged($self, queue_name: &str) -> Result<(), PgmqError> { imp::create_unlogged($client, queue_name).await }
             async fn create_partitioned($self, queue_name: &str) -> Result<bool, PgmqError> { imp::create_partitioned($client, queue_name).await }
@@ -762,22 +765,22 @@ macro_rules! impl_pgmq_for_client_source {
             async fn drop_queue($self, queue_name: &str) -> Result<(), PgmqError> { imp::drop_queue($client, queue_name).await }
             async fn purge_queue($self, queue_name: &str) -> Result<i64, PgmqError> { imp::purge_queue($client, queue_name).await }
             async fn list_queues($self) -> Result<Option<Vec<PGMQueueMeta>>, PgmqError> { imp::list_queues($client).await }
-            async fn set_vt<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, msg_id: i64, vt: VisibilityTimeoutOffset) -> Result<Message<T>, PgmqError> { imp::set_vt::<_, T>($client, queue_name, msg_id, vt).await }
+            async fn set_vt<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, msg_id: i64, vt: impl Into<VisibilityTimeoutOffset> + Send) -> Result<Message<T>, PgmqError> { imp::set_vt::<_, T>($client, queue_name, msg_id, vt).await }
             async fn send<T: Serialize + Send + Sync>($self, queue_name: &str, message: &T) -> Result<i64, PgmqError> { $self.send_delay(queue_name, message, VisibilityTimeoutOffset::seconds(0)).await }
-            async fn send_delay<T: Serialize + Send + Sync>($self, queue_name: &str, message: &T, delay: VisibilityTimeoutOffset) -> Result<i64, PgmqError> { $self.send_delay_with_headers(queue_name, message, Option::<&()>::None, delay).await }
-            async fn send_delay_with_headers<T: Serialize + Send + Sync, H: Serialize + Send + Sync>($self, queue_name: &str, message: &T, headers: Option<&H>, delay: VisibilityTimeoutOffset) -> Result<i64, PgmqError> { imp::send_delay_with_headers($client, queue_name, message, headers, delay).await }
+            async fn send_delay<T: Serialize + Send + Sync>($self, queue_name: &str, message: &T, delay: impl Into<VisibilityTimeoutOffset> + Send) -> Result<i64, PgmqError> { $self.send_delay_with_headers(queue_name, message, Option::<&()>::None, delay).await }
+            async fn send_delay_with_headers<T: Serialize + Send + Sync, H: Serialize + Send + Sync>($self, queue_name: &str, message: &T, headers: Option<&H>, delay: impl Into<VisibilityTimeoutOffset> + Send) -> Result<i64, PgmqError> { imp::send_delay_with_headers($client, queue_name, message, headers, delay).await }
             async fn send_batch<T: Serialize + Send + Sync>($self, queue_name: &str, messages: &[T]) -> Result<Vec<i64>, PgmqError> { $self.send_batch_with_delay(queue_name, messages, VisibilityTimeoutOffset::seconds(0)).await }
-            async fn send_batch_with_delay<T: Serialize + Send + Sync>($self, queue_name: &str, messages: &[T], delay: VisibilityTimeoutOffset) -> Result<Vec<i64>, PgmqError> { $self.send_batch_with_delay_with_headers(queue_name, messages, Option::<&[()]>::None, delay).await }
-            async fn send_batch_with_delay_with_headers<T: Serialize + Send + Sync, H: Serialize + Send + Sync>($self, queue_name: &str, messages: &[T], headers: Option<&[H]>, delay: VisibilityTimeoutOffset) -> Result<Vec<i64>, PgmqError> { imp::send_batch_with_delay_with_headers($client, queue_name, messages, headers, delay).await }
-            async fn read<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, vt: VisibilityTimeoutOffset) -> Result<Option<Message<T>>, PgmqError> { Ok($self.read_batch::<T>(queue_name, vt, 1).await?.into_iter().next()) }
-            async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, vt: VisibilityTimeoutOffset, qty: i32) -> Result<Vec<Message<T>>, PgmqError> { imp::read_batch::<_, T>($client, queue_name, vt, qty).await }
-            async fn read_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, vt: VisibilityTimeoutOffset, pt: Option<std::time::Duration>, pi: Option<std::time::Duration>) -> Result<Option<Message<T>>, PgmqError> { Ok($self.read_batch_with_poll::<T>(queue_name, vt, 1, pt, pi).await?.and_then(|v| v.into_iter().next())) }
-            async fn read_batch_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, vt: VisibilityTimeoutOffset, qty: i32, pt: Option<std::time::Duration>, pi: Option<std::time::Duration>) -> Result<Option<Vec<Message<T>>>, PgmqError> { Ok(Some(imp::read_batch_with_poll::<_, T>($client, queue_name, vt, qty, pt, pi).await?)) }
-            async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, vt: VisibilityTimeoutOffset, qty: i32) -> Result<Vec<Message<T>>, PgmqError> { imp::read_grouped::<_, T>($client, queue_name, vt, qty).await }
-            async fn read_grouped_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, vt: VisibilityTimeoutOffset, qty: i32, pt: Option<std::time::Duration>, pi: Option<std::time::Duration>) -> Result<Vec<Message<T>>, PgmqError> { imp::read_grouped_with_poll::<_, T>($client, queue_name, vt, qty, pt, pi).await }
-            async fn read_grouped_head<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, vt: VisibilityTimeoutOffset, qty: i32) -> Result<Vec<Message<T>>, PgmqError> { imp::read_grouped_head::<_, T>($client, queue_name, vt, qty).await }
-            async fn read_grouped_rr<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, vt: VisibilityTimeoutOffset, qty: i32) -> Result<Vec<Message<T>>, PgmqError> { imp::read_grouped_rr::<_, T>($client, queue_name, vt, qty).await }
-            async fn read_grouped_rr_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, vt: VisibilityTimeoutOffset, qty: i32, pt: Option<std::time::Duration>, pi: Option<std::time::Duration>) -> Result<Vec<Message<T>>, PgmqError> { imp::read_grouped_rr_with_poll::<_, T>($client, queue_name, vt, qty, pt, pi).await }
+            async fn send_batch_with_delay<T: Serialize + Send + Sync>($self, queue_name: &str, messages: &[T], delay: impl Into<VisibilityTimeoutOffset> + Send) -> Result<Vec<i64>, PgmqError> { $self.send_batch_with_delay_with_headers(queue_name, messages, Option::<&[()]>::None, delay).await }
+            async fn send_batch_with_delay_with_headers<T: Serialize + Send + Sync, H: Serialize + Send + Sync>($self, queue_name: &str, messages: &[T], headers: Option<&[H]>, delay: impl Into<VisibilityTimeoutOffset> + Send) -> Result<Vec<i64>, PgmqError> { imp::send_batch_with_delay_with_headers($client, queue_name, messages, headers, delay).await }
+            async fn read<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, vt: impl Into<VisibilityTimeoutOffset> + Send) -> Result<Option<Message<T>>, PgmqError> { Ok($self.read_batch::<T>(queue_name, vt, 1).await?.into_iter().next()) }
+            async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, vt: impl Into<VisibilityTimeoutOffset> + Send, qty: i32) -> Result<Vec<Message<T>>, PgmqError> { imp::read_batch::<_, T>($client, queue_name, vt, qty).await }
+            async fn read_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, vt: impl Into<VisibilityTimeoutOffset> + Send, poll_timeout: Option<std::time::Duration>, poll_interval: Option<std::time::Duration>) -> Result<Option<Message<T>>, PgmqError> { Ok($self.read_batch_with_poll::<T>(queue_name, vt, 1, poll_timeout, poll_interval).await?.and_then(|v| v.into_iter().next())) }
+            async fn read_batch_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, vt: impl Into<VisibilityTimeoutOffset> + Send, qty: i32, poll_timeout: Option<std::time::Duration>, poll_interval: Option<std::time::Duration>) -> Result<Option<Vec<Message<T>>>, PgmqError> { Ok(Some(imp::read_batch_with_poll::<_, T>($client, queue_name, vt, qty, poll_timeout, poll_interval).await?)) }
+            async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, vt: impl Into<VisibilityTimeoutOffset> + Send, qty: i32) -> Result<Vec<Message<T>>, PgmqError> { imp::read_grouped::<_, T>($client, queue_name, vt, qty).await }
+            async fn read_grouped_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, vt: impl Into<VisibilityTimeoutOffset> + Send, qty: i32, poll_timeout: Option<std::time::Duration>, poll_interval: Option<std::time::Duration>) -> Result<Vec<Message<T>>, PgmqError> { imp::read_grouped_with_poll::<_, T>($client, queue_name, vt, qty, poll_timeout, poll_interval).await }
+            async fn read_grouped_head<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, vt: impl Into<VisibilityTimeoutOffset> + Send, qty: i32) -> Result<Vec<Message<T>>, PgmqError> { imp::read_grouped_head::<_, T>($client, queue_name, vt, qty).await }
+            async fn read_grouped_rr<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, vt: impl Into<VisibilityTimeoutOffset> + Send, qty: i32) -> Result<Vec<Message<T>>, PgmqError> { imp::read_grouped_rr::<_, T>($client, queue_name, vt, qty).await }
+            async fn read_grouped_rr_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str, vt: impl Into<VisibilityTimeoutOffset> + Send, qty: i32, poll_timeout: Option<std::time::Duration>, poll_interval: Option<std::time::Duration>) -> Result<Vec<Message<T>>, PgmqError> { imp::read_grouped_rr_with_poll::<_, T>($client, queue_name, vt, qty, poll_timeout, poll_interval).await }
             async fn archive($self, queue_name: &str, msg_id: i64) -> Result<bool, PgmqError> { imp::archive($client, queue_name, msg_id).await }
             async fn archive_batch($self, queue_name: &str, msg_ids: &[i64]) -> Result<usize, PgmqError> { imp::archive_batch($client, queue_name, msg_ids).await }
             async fn pop<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>($self, queue_name: &str) -> Result<Option<Message<T>>, PgmqError> { imp::pop::<_, T>($client, queue_name).await }
@@ -789,8 +792,8 @@ macro_rules! impl_pgmq_for_client_source {
             async fn unbind_topic($self, pattern: &str, queue_name: &str) -> Result<(), PgmqError> { imp::unbind_topic($client, pattern, queue_name).await }
             async fn list_topic_bindings($self, queue_name: &str) -> Result<Vec<ListTopicBindingsRow>, PgmqError> { imp::list_topic_bindings($client, queue_name).await }
             async fn list_topic_bindings_all($self) -> Result<Vec<ListTopicBindingsRow>, PgmqError> { imp::list_topic_bindings_all($client).await }
-            async fn send_topic<T: Serialize + Send + Sync, H: Serialize + Send + Sync>($self, rk: &str, m: &T, h: Option<&H>, d: VisibilityTimeoutOffset) -> Result<i32, PgmqError> { imp::send_topic($client, rk, m, h, d).await }
-            async fn send_batch_topic<T: Serialize + Send + Sync, H: Serialize + Send + Sync>($self, rk: &str, m: &[T], h: Option<&[H]>, d: VisibilityTimeoutOffset) -> Result<Vec<SendBatchTopicRow>, PgmqError> { imp::send_batch_topic($client, rk, m, h, d).await }
+            async fn send_topic<T: Serialize + Send + Sync, H: Serialize + Send + Sync>($self, rk: &str, m: &T, h: Option<&H>, d: impl Into<VisibilityTimeoutOffset> + Send) -> Result<i32, PgmqError> { imp::send_topic($client, rk, m, h, d).await }
+            async fn send_batch_topic<T: Serialize + Send + Sync, H: Serialize + Send + Sync>($self, rk: &str, m: &[T], h: Option<&[H]>, d: impl Into<VisibilityTimeoutOffset> + Send) -> Result<Vec<SendBatchTopicRow>, PgmqError> { imp::send_batch_topic($client, rk, m, h, d).await }
             async fn enable_notify_insert($self, queue_name: &str, t: std::time::Duration) -> Result<(), PgmqError> { imp::enable_notify_insert($client, queue_name, t).await }
             async fn disable_notify_insert($self, queue_name: &str) -> Result<(), PgmqError> { imp::disable_notify_insert($client, queue_name).await }
             async fn update_notify_insert($self, queue_name: &str, t: std::time::Duration) -> Result<(), PgmqError> { imp::update_notify_insert($client, queue_name, t).await }

@@ -20,8 +20,8 @@ pub enum PgmqError {
     #[error("row decode error: column '{column}': {reason}")]
     RowDecodeError { column: String, reason: String },
 
-    /// a queue name error
-    /// queue names must be alphanumeric and start with a letter
+    /// Returned when a queue/topic name fails client-side validation. Names must be
+    /// non-empty, at most 48 characters, and contain only ASCII alphanumerics or underscores.
     #[error("invalid queue name: '{name}'")]
     InvalidQueueName { name: String },
 

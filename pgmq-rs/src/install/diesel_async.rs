@@ -1,5 +1,5 @@
 //! diesel-async install/migration entry points. Each function uses diesel-async's
-//! `AsyncConnection::transaction(|conn| ...)` callback for multi-statement atomicity.
+//! `AsyncConnection::transaction(async |conn| ...)` callback for multi-statement atomicity.
 
 use super::internal::*;
 use super::Version;
@@ -8,7 +8,6 @@ use crate::install::script::{ParsedScriptName, ScriptFetcher};
 use diesel::sql_types;
 use diesel::{sql_query, QueryableByName};
 use diesel_async::pooled_connection::deadpool::Pool;
-use diesel_async::scoped_futures::ScopedFutureExt;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl, SimpleAsyncConnection};
 use std::str::FromStr;
 
@@ -22,12 +21,9 @@ struct AppliedMigrationRow {
 
 pub async fn init(pool: &Pool<AsyncPgConnection>) -> Result<(), PgmqError> {
     let mut conn = pool.get().await?;
-    conn.transaction::<_, PgmqError, _>(|conn| {
-        async move {
-            conn.batch_execute(INIT_SQL).await?;
-            Ok(())
-        }
-        .scope_boxed()
+    conn.transaction::<_, PgmqError, _>(async |conn| {
+        conn.batch_execute(&init_sql()).await?;
+        Ok(())
     })
     .await
 }
@@ -38,16 +34,13 @@ pub async fn init_migrations_table(
     version: Version,
 ) -> Result<(), PgmqError> {
     let mut conn = pool.get().await?;
-    conn.transaction::<_, PgmqError, _>(|conn| {
-        async move {
-            create_migrations_table(conn).await?;
-            if !fetch_applied(conn).await?.is_empty() {
-                return Ok(());
-            }
-            insert_applied(conn, &ParsedScriptName::init_script(version)).await?;
-            Ok(())
+    conn.transaction::<_, PgmqError, _>(async |conn| {
+        create_migrations_table(conn).await?;
+        if !fetch_applied(conn).await?.is_empty() {
+            return Ok(());
         }
-        .scope_boxed()
+        insert_applied(conn, &ParsedScriptName::init_script(version)).await?;
+        Ok(())
     })
     .await
 }
@@ -57,13 +50,10 @@ pub async fn installed_version(
     pool: &Pool<AsyncPgConnection>,
 ) -> Result<Option<Version>, PgmqError> {
     let mut conn = pool.get().await?;
-    conn.transaction::<_, PgmqError, _>(|conn| {
-        async move {
-            create_migrations_table(conn).await?;
-            let applied = fetch_applied(conn).await?;
-            Ok(applied.into_iter().map(|a| a.version).max())
-        }
-        .scope_boxed()
+    conn.transaction::<_, PgmqError, _>(async |conn| {
+        create_migrations_table(conn).await?;
+        let applied = fetch_applied(conn).await?;
+        Ok(applied.into_iter().map(|a| a.version).max())
     })
     .await
 }
@@ -91,41 +81,32 @@ async fn install_sql<F: ScriptFetcher + Send>(
     let mut conn = pool.get().await?;
 
     // Fetch scripts outside the transaction (network IO for the github fetcher).
-    let installed_version_opt = {
-        conn.transaction::<_, PgmqError, _>(|conn| {
-            async move {
-                create_migrations_table(conn).await?;
-                let applied = fetch_applied(conn).await?;
-                Ok(max_applied_version(&applied).cloned())
-            }
-            .scope_boxed()
-        })
-        .await?
-    };
-    let available = script_fetcher.fetch(installed_version_opt.as_ref()).await?;
-
-    conn.transaction::<_, PgmqError, _>(|conn| {
-        async move {
+    let installed_version_opt = conn
+        .transaction::<_, PgmqError, _>(async |conn| {
             create_migrations_table(conn).await?;
             let applied = fetch_applied(conn).await?;
-            let to_apply = filter_unapplied_scripts(available, &applied);
+            Ok(max_applied_version(&applied).cloned())
+        })
+        .await?;
+    let available = script_fetcher.fetch(installed_version_opt.as_ref()).await?;
 
-            for script in &to_apply {
-                // Multi-statement migration SQL — batch_execute equivalent in diesel-async is
-                // running the whole thing as a single sql_query (which Postgres splits at
-                // semicolons in a single message).
-                sql_query(script.content.as_ref()).execute(conn).await?;
-                insert_applied(conn, &script.name).await?;
-            }
-            Ok(())
+    conn.transaction::<_, PgmqError, _>(async |conn| {
+        create_migrations_table(conn).await?;
+        let applied = fetch_applied(conn).await?;
+        let to_apply = filter_unapplied_scripts(available, &applied);
+
+        for script in &to_apply {
+            // Multi-statement migration SQL — postgres splits at semicolons.
+            sql_query(script.content.as_ref()).execute(conn).await?;
+            insert_applied(conn, &script.name).await?;
         }
-        .scope_boxed()
+        Ok(())
     })
     .await
 }
 
 async fn create_migrations_table(conn: &mut AsyncPgConnection) -> Result<(), PgmqError> {
-    conn.batch_execute(SETUP_MIGRATIONS_TABLE_SQL).await?;
+    conn.batch_execute(&setup_migrations_table_sql()).await?;
     Ok(())
 }
 

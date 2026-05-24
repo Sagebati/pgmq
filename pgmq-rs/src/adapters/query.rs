@@ -54,16 +54,14 @@ pub fn convert_archive_partitioned_sql(
     has_partition_interval: bool,
     has_retention_interval: bool,
 ) -> String {
-    use std::fmt::Write;
     let mut sql = String::from("SELECT pgmq.convert_archive_partitioned(table_name=>$1::text");
     let mut idx = 2;
     if has_partition_interval {
-        // `write!` to a String never fails — unwrap is safe.
-        write!(sql, ", partition_interval=>${idx}::text").unwrap();
+        sql.push_str(&format!(", partition_interval=>${idx}::text"));
         idx += 1;
     }
     if has_retention_interval {
-        write!(sql, ", retention_interval=>${idx}::text").unwrap();
+        sql.push_str(&format!(", retention_interval=>${idx}::text"));
     }
     sql.push_str(");");
     sql

@@ -24,7 +24,7 @@ struct AppliedMigrationRow {
 
 pub fn init(conn: &mut PgConnection) -> Result<(), PgmqError> {
     conn.transaction::<_, PgmqError, _>(|conn| {
-        conn.batch_execute(INIT_SQL)?;
+        conn.batch_execute(&init_sql())?;
         Ok(())
     })
 }
@@ -74,7 +74,7 @@ pub fn install_sql_from_embedded(conn: &mut PgConnection) -> Result<(), PgmqErro
 }
 
 fn create_migrations_table(conn: &mut PgConnection) -> Result<(), PgmqError> {
-    conn.batch_execute(SETUP_MIGRATIONS_TABLE_SQL)?;
+    conn.batch_execute(&setup_migrations_table_sql())?;
     Ok(())
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "pgmq"
-version = "0.34.0"
+version = "0.34.0-alpha"
 edition = "2021"
 authors = ["PGMQ Maintainers"]
 description = "A distributed message queue for Rust applications, on Postgres."
@@ -29,60 +29,60 @@ install-sql-github = ["install-sql", "dep:reqwest", "dep:url", "url/serde", "dep
 install-sql-embedded = ["install-sql", "dep:include_dir"]
 
 [dependencies]
-# 1.x+ crates pinned to just the major.
-async-trait = "0.1"
-chrono = { version = "0.4", features = ["serde"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["raw_value"] }
-thiserror = "1"
+async-trait = "0.1.83"
+chrono = { version = "0.4.34", features = ["serde"] }
+serde = { version = "1.0.152", features = ["derive"] }
+serde_json = { version = "1.0.91", features = ["raw_value"] }
+thiserror = "1.0.38"
 
 # Optional driver-adapter dependencies.
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "chrono", "json", "macros"], optional = true }
-tokio-postgres = { version = "0.7", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1"], optional = true }
-# deadpool-postgres is a *dev-dep only* — used by smoke tests/examples. Users bring whatever
-# pool they prefer (deadpool, bb8, mobc, custom, none). pgmq depends only on tokio-postgres.
-diesel = { version = "2", default-features = false, features = ["postgres", "chrono", "serde_json"], optional = true }
-diesel-async = { version = "0.5", default-features = false, features = ["postgres", "deadpool"], optional = true }
+sqlx = { version = "0.8.1", default-features = false, features = ["runtime-tokio", "postgres", "chrono", "json", "macros"], optional = true }
+tokio-postgres = { version = "0.7.10", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1"], optional = true }
+diesel = { version = "2.2.0", default-features = false, features = ["postgres", "chrono", "serde_json"], optional = true }
+diesel-async = { version = "0.9.0", default-features = false, features = ["postgres", "deadpool"], optional = true }
 
 # Optional observability.
-tracing = { version = "0.1", optional = true }
-
-# Optional CLI dependencies (only needed by the `cli` feature for the pgmq-cli binary).
-tokio = { version = "1", default-features = false, optional = true }
+tracing = { version = "0.1.40", optional = true }
 
 # Optional install/CLI dependencies.
-url = { version = "2", optional = true }
-log = { version = "0.4", optional = true }
-clap = { version = "4", features = ["derive"], optional = true }
-env_logger = { version = "0.10", optional = true }
-futures-util = { version = "0.3", optional = true }
-include_dir = { version = "0.7", optional = true }
-regex = { version = "1", optional = true }
-itertools = { version = "0.14", optional = true }
-reqwest = { version = "0.13", features = ["json"], optional = true }
+tokio = { version = "1.38.0", default-features = false, optional = true }
+url = { version = "2.4.0", optional = true }
+log = { version = "0.4.18", optional = true }
+clap = { version = "4.1", features = ["derive"], optional = true }
+env_logger = { version = "0.10.0", optional = true }
+futures-util = { version = "0.3.31", optional = true }
+include_dir = { version = "0.7.4", optional = true }
+regex = { version = "1.12.3", optional = true }
+itertools = { version = "0.14.0", optional = true }
+reqwest = { version = "0.13.0", features = ["json"], optional = true }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-deadpool-postgres = "0.14"      # used by tokio-postgres smoke tests + example
-url = "2"                       # used by tokio-postgres smoke test to parse DATABASE_URL
-cargo-readme = "3"
-criterion = "0.4"
-env_logger = "0.10"
-rand = "0.8"
-regex = "1"
-lazy_static = "1"
-insta = { version = "1", features = ["json"] }
+tokio = { version = "1.38.0", features = ["macros", "rt-multi-thread"] }
+deadpool-postgres = "0.14"      # used by the tokio_postgres_basic example
+cargo-readme = "3.2.0"
+criterion = "0.7"
+env_logger = "0.10.0"
+rand = "0.8.5"
+regex = "1.5.4"
+lazy_static = "1.4.0"
+insta = { version = "1.46.3", features = ["json"] }
 
 # If a consumer has both the `time` and `chrono` features of `sqlx` enabled, `sqlx` will default to using
 # `OffsetDateTime` (from `time`) for timestamp fields instead of `DateTime<Utc>` (from `chrono`), causing a compilation
 # error in `pgmq`. See this issue for more details: https://github.com/launchbadge/sqlx/issues/3412
-# Note: default-features = false to avoid pulling in sqlx::Any, which causes Type<_> ambiguity errors.
-sqlx = { version = "0.8", default-features = false, features = ["time", "postgres", "runtime-tokio", "chrono", "macros", "json"] }
+#
+# `pgmq` only uses the `chrono` feature of `sqlx`, so it's possible to add a query that would encounter this conflict
+# in a consumer and not notice because `pgmq` compiles fine on its own. To ensure queries that would see this conflict
+# are not added in the future, add the `time` feature in dev dependencies. This is a "regression test" of sorts, in
+# that it will enable the `time` feature in tests/examples, simulating the behavior of a consumer of `pgmq` that has
+# both the `time` and `chrono` features enabled. If a query that would see the conflict is added, `pgmq` will fail to
+# compile when running tests/examples.
+sqlx = { version = "0.8.1", features = ["time"] }
 
 [[example]]
 name = "install"
 path = "examples/install.rs"
-required-features = ["cli"]
+required-features = ["sqlx", "install-sql-embedded", "install-sql-github"]
 
 [[example]]
 name = "transactions"

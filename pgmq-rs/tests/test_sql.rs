@@ -1,7 +1,7 @@
 #![cfg(feature = "sqlx")]
 
 use pgmq::pg_ext::VisibilityTimeoutOffset;
-use pgmq::PGMQueueExt;
+use pgmq::PgMQConnExt;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -22,7 +22,6 @@ impl Default for MyMessage {
     }
 }
 
-#[ignore]
 #[cfg(feature = "install-sql-embedded")]
 #[tokio::test]
 async fn test_sql_lifecycle() {

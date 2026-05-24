@@ -1,5 +1,5 @@
 use pgmq::pg_ext::VisibilityTimeoutOffset;
-use pgmq::{Message, PGMQueueExt};
+use pgmq::{Message, PgMQConnExt};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 

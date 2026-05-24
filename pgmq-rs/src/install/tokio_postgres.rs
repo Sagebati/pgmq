@@ -14,7 +14,7 @@ use tokio_postgres::{Client, Transaction};
 /// uses a transaction-scoped advisory lock to safely handle concurrent callers.
 pub async fn init(client: &mut Client) -> Result<(), PgmqError> {
     let tx = client.transaction().await?;
-    tx.batch_execute(INIT_SQL).await?;
+    tx.batch_execute(&init_sql()).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -81,7 +81,7 @@ async fn install_sql(
 }
 
 async fn create_migrations_table(tx: &Transaction<'_>) -> Result<(), PgmqError> {
-    tx.batch_execute(SETUP_MIGRATIONS_TABLE_SQL).await?;
+    tx.batch_execute(&setup_migrations_table_sql()).await?;
     Ok(())
 }
 

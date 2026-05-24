@@ -1,8 +1,11 @@
 use std::ops::Deref;
 
+#[cfg(feature = "sqlx")]
+use sqlx::{Database, Encode, Type};
+
 /// Type to represent an offset that will be applied to the current timestamp in order to update
 /// the `vt` (visibility timeout) timestamp column of a queue message. Used by various
-/// methods in [`crate::PGMQueueExt`] to set the visibility timeout of a job. Supports
+/// methods in [`crate::PgMQConnExt`] to set the visibility timeout of a job. Supports
 /// converting from [`chrono::Duration`], [`std::time::Duration`], and various integer types
 /// (assumed to be a duration in seconds).
 ///
@@ -63,6 +66,12 @@ use std::ops::Deref;
 /// assert_eq!(VisibilityTimeoutOffset::MAX, VisibilityTimeoutOffset::from(chrono::Duration::MAX));
 /// ```
 ///
+/// ## Convert from [`chrono::Duration`] -- capped min
+/// ```
+/// # use pgmq::pg_ext::VisibilityTimeoutOffset;
+/// assert_eq!(VisibilityTimeoutOffset::MIN, VisibilityTimeoutOffset::from(chrono::Duration::MIN));
+/// ```
+///
 /// ## Convert from [`std::time::Duration`]
 /// ```
 /// # use pgmq::pg_ext::VisibilityTimeoutOffset;
@@ -75,6 +84,7 @@ use std::ops::Deref;
 /// assert_eq!(VisibilityTimeoutOffset::MAX, VisibilityTimeoutOffset::from(std::time::Duration::MAX));
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "sqlx", derive(Encode))]
 pub struct VisibilityTimeoutOffset(i32);
 
 impl VisibilityTimeoutOffset {
@@ -143,5 +153,21 @@ impl From<chrono::Duration> for VisibilityTimeoutOffset {
 impl From<std::time::Duration> for VisibilityTimeoutOffset {
     fn from(value: std::time::Duration) -> Self {
         value.as_secs().into()
+    }
+}
+
+/*
+Manually implement `sqlx::Type` because the derive macro automatically implements both
+`sqlx::Encode` and `sqlx::Decode`, but we only need `sqlx::Encode` for this type.
+However, `sqlx::Encode` is implemented via a derive macro.
+*/
+#[cfg(feature = "sqlx")]
+impl<DB: Database> Type<DB> for VisibilityTimeoutOffset
+where
+    i32: Type<DB>,
+    std::time::Duration: Type<DB>,
+{
+    fn type_info() -> DB::TypeInfo {
+        <i32 as sqlx::Type<DB>>::type_info()
     }
 }

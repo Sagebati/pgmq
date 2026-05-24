@@ -1,6 +1,6 @@
 //! # Driver adapters
 //!
-//! Each driver implements [`crate::PGMQueueExt`] for its connection and transaction types.
+//! Each driver implements [`crate::PgMQConnExt`] for its connection and transaction types.
 //! Pick the adapter for the driver you're already using:
 //!
 //! | Driver | Module | Cargo feature |

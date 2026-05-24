@@ -1,5 +1,5 @@
 use pgmq::pg_ext::VisibilityTimeoutOffset;
-use pgmq::{errors::PgmqError, Message, PGMQueueExt};
+use pgmq::{errors::PgmqError, Message, PgMQConnExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::PgPool;

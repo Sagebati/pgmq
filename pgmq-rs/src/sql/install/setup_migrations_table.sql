@@ -4,7 +4,7 @@
 --
 -- The advisory lock key (-9223372036854771659 = i64::MIN + 4149) is the same key used by
 -- init.sql — see src/install/mod.rs::ADVISORY_LOCK_KEY.
-SELECT pg_advisory_xact_lock(-9223372036854771659);
+SELECT pg_advisory_xact_lock({LOCK_KEY});
 CREATE SCHEMA IF NOT EXISTS pgmq;
 CREATE TABLE IF NOT EXISTS pgmq.__pgmq_migrations (
     name TEXT PRIMARY KEY NOT NULL,

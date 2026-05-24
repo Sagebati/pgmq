@@ -1,4 +1,4 @@
-//! # The queue API — [`PGMQueueExt`]
+//! # The queue API — [`PgMQConnExt`]
 //!
 //! This module declares the extension trait that adds queue methods to your Postgres
 //! connection. Each driver adapter in [`crate::adapters`] implements every method natively
@@ -7,7 +7,7 @@
 //! Bring the trait into scope and call methods directly on a connection or transaction:
 //!
 //! ```ignore
-//! use pgmq::PGMQueueExt;
+//! use pgmq::PgMQConnExt;
 //! conn.create("my_queue").await?;
 //! let id = conn.send("my_queue", &payload).await?;
 //! ```
@@ -39,7 +39,7 @@
 //!
 //! ## Composing with transactions
 //!
-//! Every adapter implements `PGMQueueExt` on its driver's transaction type, so enqueue/dequeue
+//! Every adapter implements `PgMQConnExt` on its driver's transaction type, so enqueue/dequeue
 //! can be atomic with your own SQL. The exact incantation varies per driver — see each
 //! adapter's module documentation for the pattern:
 //!
@@ -68,7 +68,7 @@ pub use visibility_timeout_offest::VisibilityTimeoutOffset;
 /// Queue API for the `pgmq` Postgres extension. Implemented natively by each driver adapter.
 /// Bring this trait into scope to call queue methods directly on your pool or transaction.
 #[async_trait]
-pub trait PGMQueueExt {
+pub trait PgMQConnExt {
     /// Create a queue. Idempotent.
     async fn create(self, queue_name: &str) -> Result<(), PgmqError>;
 
@@ -100,7 +100,7 @@ pub trait PGMQueueExt {
         self,
         queue_name: &str,
         msg_id: i64,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Message<T>, PgmqError>;
 
     /// Send a message. Returns its msg_id.
@@ -115,7 +115,7 @@ pub trait PGMQueueExt {
         self,
         queue_name: &str,
         message: &T,
-        delay: VisibilityTimeoutOffset,
+        delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<i64, PgmqError>;
 
     /// Send a message with optional headers and a delay.
@@ -124,7 +124,7 @@ pub trait PGMQueueExt {
         queue_name: &str,
         message: &T,
         headers: Option<&H>,
-        delay: VisibilityTimeoutOffset,
+        delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<i64, PgmqError>;
 
     /// Send a batch of messages.
@@ -138,7 +138,7 @@ pub trait PGMQueueExt {
         self,
         queue_name: &str,
         messages: &[T],
-        delay: VisibilityTimeoutOffset,
+        delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Vec<i64>, PgmqError>;
 
     async fn send_batch_with_delay_with_headers<
@@ -149,26 +149,26 @@ pub trait PGMQueueExt {
         queue_name: &str,
         messages: &[T],
         headers: Option<&[H]>,
-        delay: VisibilityTimeoutOffset,
+        delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Vec<i64>, PgmqError>;
 
     async fn read<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Option<Message<T>>, PgmqError>;
 
     async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError>;
 
     async fn read_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Option<Message<T>>, PgmqError>;
@@ -176,7 +176,7 @@ pub trait PGMQueueExt {
     async fn read_batch_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         max_batch_size: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
@@ -185,14 +185,14 @@ pub trait PGMQueueExt {
     async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError>;
 
     async fn read_grouped_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
@@ -201,21 +201,21 @@ pub trait PGMQueueExt {
     async fn read_grouped_head<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError>;
 
     async fn read_grouped_rr<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError>;
 
     async fn read_grouped_rr_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
@@ -250,7 +250,7 @@ pub trait PGMQueueExt {
         routing_key: &str,
         message: &T,
         headers: Option<&H>,
-        delay: VisibilityTimeoutOffset,
+        delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<i32, PgmqError>;
 
     async fn send_batch_topic<T: Serialize + Send + Sync, H: Serialize + Send + Sync>(
@@ -258,7 +258,7 @@ pub trait PGMQueueExt {
         routing_key: &str,
         messages: &[T],
         headers: Option<&[H]>,
-        delay: VisibilityTimeoutOffset,
+        delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Vec<SendBatchTopicRow>, PgmqError>;
 
     async fn enable_notify_insert(
@@ -284,7 +284,7 @@ pub trait PGMQueueExt {
 // in `crate::adapters::helpers` (private module).
 
 /// Translate the given queue name into the name of the Postgres notification channel that will
-/// be triggered when using [`PGMQueueExt::enable_notify_insert`]. Listen on this channel to
+/// be triggered when using [`PgMQConnExt::enable_notify_insert`]. Listen on this channel to
 /// receive notifications when an item is inserted into the queue.
 ///
 /// # Examples

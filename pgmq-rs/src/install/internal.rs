@@ -6,6 +6,7 @@
 
 use crate::install::script::MigrationScript;
 use crate::install::version::Version;
+#[cfg(feature = "install-sql-github")]
 use crate::PgmqError;
 
 /// A row from `pgmq.__pgmq_migrations`.
@@ -49,10 +50,30 @@ pub async fn github_fetcher(
 // SQL constants used by the per-driver install modules. Inlined from `src/sql/install/*.sql` —
 // kept internal because they're an implementation detail of the install path.
 
-pub const INIT_SQL: &str = include_str!("../sql/install/init.sql");
-pub const SETUP_MIGRATIONS_TABLE_SQL: &str =
+/// Advisory lock key used by `init` and `setup_migrations_table` to serialize concurrent
+/// installs/upgrades. A randomly-chosen large negative bigint (`i64::MIN + 4149`) picked to
+/// minimize collision with application-level advisory locks.
+///
+/// Substituted into the install SQL at runtime in place of the `{LOCK_KEY}` placeholder.
+/// (The simple-query protocol used by `batch_execute` doesn't support parameters, so we
+/// inline the value as text.)
+pub const ADVISORY_LOCK_KEY: i64 = i64::MIN + 4149;
+
+const INIT_SQL_TEMPLATE: &str = include_str!("../sql/install/init.sql");
+const SETUP_MIGRATIONS_TABLE_SQL_TEMPLATE: &str =
     include_str!("../sql/install/setup_migrations_table.sql");
 pub const SELECT_APPLIED_MIGRATIONS_SQL: &str =
     include_str!("../sql/install/select_applied_migrations.sql");
 pub const INSERT_APPLIED_MIGRATION_SQL: &str =
     include_str!("../sql/install/insert_applied_migration.sql");
+
+/// Substitutes the `{LOCK_KEY}` placeholder in [`INIT_SQL_TEMPLATE`] with [`ADVISORY_LOCK_KEY`].
+pub fn init_sql() -> String {
+    INIT_SQL_TEMPLATE.replace("{LOCK_KEY}", &ADVISORY_LOCK_KEY.to_string())
+}
+
+/// Substitutes the `{LOCK_KEY}` placeholder in [`SETUP_MIGRATIONS_TABLE_SQL_TEMPLATE`] with
+/// [`ADVISORY_LOCK_KEY`].
+pub fn setup_migrations_table_sql() -> String {
+    SETUP_MIGRATIONS_TABLE_SQL_TEMPLATE.replace("{LOCK_KEY}", &ADVISORY_LOCK_KEY.to_string())
+}

@@ -1,6 +1,6 @@
 //! # diesel (sync) adapter
 //!
-//! Implements [`crate::PGMQueueExt`] for [`&mut diesel::pg::PgConnection`](diesel::pg::PgConnection).
+//! Implements [`crate::PgMQConnExt`] for [`&mut diesel::pg::PgConnection`](diesel::pg::PgConnection).
 //!
 //! The trait signature is `async fn`, but diesel's sync `PgConnection` runs everything
 //! synchronously. Method bodies execute diesel I/O on the calling thread; the returned future
@@ -38,7 +38,7 @@
 //! ## Normal use (no async runtime, with `block_on` helper)
 //!
 //! ```ignore
-//! use pgmq::PGMQueueExt;
+//! use pgmq::PgMQConnExt;
 //! use pgmq::pg_ext::VisibilityTimeoutOffset;
 //! use diesel::Connection;
 //!
@@ -86,7 +86,7 @@
 //! `&mut PgConnection`. Call pgmq methods on it directly inside the closure:
 //!
 //! ```ignore
-//! use pgmq::PGMQueueExt;
+//! use pgmq::PgMQConnExt;
 //! use diesel::{Connection, RunQueryDsl};
 //!
 //! conn.transaction::<_, pgmq::PgmqError, _>(|conn| {
@@ -123,7 +123,7 @@ use super::helpers::{
 };
 use super::query;
 use crate::errors::PgmqError;
-use crate::pg_ext::{PGMQueueExt, VisibilityTimeoutOffset};
+use crate::pg_ext::{PgMQConnExt, VisibilityTimeoutOffset};
 use crate::types::{
     ListNotifyInsertThrottlesRow, ListTopicBindingsRow, Message, PGMQueueMeta, QueueMetrics,
     SendBatchTopicRow,
@@ -157,7 +157,7 @@ struct ArchiveCol {
 #[derive(QueryableByName)]
 struct DeleteCol {
     #[diesel(sql_type = sql_types::Bool)]
-    delete: bool,
+    was_deleted: bool,
 }
 #[derive(QueryableByName)]
 struct PurgeQueueCol {
@@ -197,7 +197,7 @@ impl MessageRowJson {
 }
 
 #[async_trait]
-impl PGMQueueExt for &mut PgConnection {
+impl PgMQConnExt for &mut PgConnection {
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn create(self, queue_name: &str) -> Result<(), PgmqError> {
         check_input(queue_name)?;
@@ -282,13 +282,13 @@ impl PGMQueueExt for &mut PgConnection {
         self,
         queue_name: &str,
         msg_id: i64,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Message<T>, PgmqError> {
         check_input(queue_name)?;
         let row: MessageRowJson = sql_query(query::SET_VT)
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::BigInt, _>(msg_id)
-            .bind::<sql_types::Integer, _>(vt.as_seconds())
+            .bind::<sql_types::Integer, _>(vt.into().as_seconds())
             .get_result(self)?;
         row.into_message()
     }
@@ -306,7 +306,7 @@ impl PGMQueueExt for &mut PgConnection {
         self,
         queue_name: &str,
         message: &T,
-        delay: VisibilityTimeoutOffset,
+        delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<i64, PgmqError> {
         self.send_delay_with_headers(queue_name, message, Option::<&()>::None, delay)
             .await
@@ -317,7 +317,7 @@ impl PGMQueueExt for &mut PgConnection {
         queue_name: &str,
         message: &T,
         headers: Option<&H>,
-        delay: VisibilityTimeoutOffset,
+        delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<i64, PgmqError> {
         check_input(queue_name)?;
         let message = serde_json::to_value(message)?;
@@ -329,7 +329,7 @@ impl PGMQueueExt for &mut PgConnection {
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::Jsonb, _>(message)
             .bind::<sql_types::Nullable<sql_types::Jsonb>, _>(headers)
-            .bind::<sql_types::Integer, _>(delay.as_seconds())
+            .bind::<sql_types::Integer, _>(delay.into().as_seconds())
             .get_result(self)?;
         Ok(row.send)
     }
@@ -347,7 +347,7 @@ impl PGMQueueExt for &mut PgConnection {
         self,
         queue_name: &str,
         messages: &[T],
-        delay: VisibilityTimeoutOffset,
+        delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Vec<i64>, PgmqError> {
         self.send_batch_with_delay_with_headers(queue_name, messages, Option::<&[()]>::None, delay)
             .await
@@ -361,7 +361,7 @@ impl PGMQueueExt for &mut PgConnection {
         queue_name: &str,
         messages: &[T],
         headers: Option<&[H]>,
-        delay: VisibilityTimeoutOffset,
+        delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Vec<i64>, PgmqError> {
         check_input(queue_name)?;
         let messages = serialize_list(messages)?;
@@ -370,7 +370,7 @@ impl PGMQueueExt for &mut PgConnection {
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::Array<sql_types::Jsonb>, _>(messages)
             .bind::<sql_types::Nullable<sql_types::Array<sql_types::Jsonb>>, _>(headers)
-            .bind::<sql_types::Integer, _>(delay.as_seconds())
+            .bind::<sql_types::Integer, _>(delay.into().as_seconds())
             .load(self)?;
         Ok(rows.into_iter().map(|r| r.send_batch).collect())
     }
@@ -378,7 +378,7 @@ impl PGMQueueExt for &mut PgConnection {
     async fn read<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Option<Message<T>>, PgmqError> {
         Ok(self
             .read_batch::<T>(queue_name, vt, 1)
@@ -390,13 +390,13 @@ impl PGMQueueExt for &mut PgConnection {
     async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let rows: Vec<MessageRowJson> = sql_query(query::READ)
             .bind::<sql_types::Text, _>(queue_name)
-            .bind::<sql_types::Integer, _>(vt.as_seconds())
+            .bind::<sql_types::Integer, _>(vt.into().as_seconds())
             .bind::<sql_types::Integer, _>(qty)
             .load(self)?;
         rows.into_iter().map(MessageRowJson::into_message).collect()
@@ -405,7 +405,7 @@ impl PGMQueueExt for &mut PgConnection {
     async fn read_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         pt: Option<std::time::Duration>,
         pi: Option<std::time::Duration>,
     ) -> Result<Option<Message<T>>, PgmqError> {
@@ -418,7 +418,7 @@ impl PGMQueueExt for &mut PgConnection {
     async fn read_batch_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         max_batch_size: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
@@ -428,7 +428,7 @@ impl PGMQueueExt for &mut PgConnection {
         let pi = poll_interval_to_ms(poll_interval);
         let rows: Vec<MessageRowJson> = sql_query(query::READ_WITH_POLL)
             .bind::<sql_types::Text, _>(queue_name)
-            .bind::<sql_types::Integer, _>(vt.as_seconds())
+            .bind::<sql_types::Integer, _>(vt.into().as_seconds())
             .bind::<sql_types::Integer, _>(max_batch_size)
             .bind::<sql_types::Integer, _>(pt)
             .bind::<sql_types::Integer, _>(pi)
@@ -443,13 +443,13 @@ impl PGMQueueExt for &mut PgConnection {
     async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let rows: Vec<MessageRowJson> = sql_query(query::READ_GROUPED)
             .bind::<sql_types::Text, _>(queue_name)
-            .bind::<sql_types::Integer, _>(vt.as_seconds())
+            .bind::<sql_types::Integer, _>(vt.into().as_seconds())
             .bind::<sql_types::Integer, _>(qty)
             .load(self)?;
         rows.into_iter().map(MessageRowJson::into_message).collect()
@@ -458,7 +458,7 @@ impl PGMQueueExt for &mut PgConnection {
     async fn read_grouped_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
@@ -468,7 +468,7 @@ impl PGMQueueExt for &mut PgConnection {
         let pi = poll_interval_to_ms(poll_interval);
         let rows: Vec<MessageRowJson> = sql_query(query::READ_GROUPED_WITH_POLL)
             .bind::<sql_types::Text, _>(queue_name)
-            .bind::<sql_types::Integer, _>(vt.as_seconds())
+            .bind::<sql_types::Integer, _>(vt.into().as_seconds())
             .bind::<sql_types::Integer, _>(qty)
             .bind::<sql_types::Integer, _>(pt)
             .bind::<sql_types::Integer, _>(pi)
@@ -479,13 +479,13 @@ impl PGMQueueExt for &mut PgConnection {
     async fn read_grouped_head<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let rows: Vec<MessageRowJson> = sql_query(query::READ_GROUPED_HEAD)
             .bind::<sql_types::Text, _>(queue_name)
-            .bind::<sql_types::Integer, _>(vt.as_seconds())
+            .bind::<sql_types::Integer, _>(vt.into().as_seconds())
             .bind::<sql_types::Integer, _>(qty)
             .load(self)?;
         rows.into_iter().map(MessageRowJson::into_message).collect()
@@ -494,13 +494,13 @@ impl PGMQueueExt for &mut PgConnection {
     async fn read_grouped_rr<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let rows: Vec<MessageRowJson> = sql_query(query::READ_GROUPED_RR)
             .bind::<sql_types::Text, _>(queue_name)
-            .bind::<sql_types::Integer, _>(vt.as_seconds())
+            .bind::<sql_types::Integer, _>(vt.into().as_seconds())
             .bind::<sql_types::Integer, _>(qty)
             .load(self)?;
         rows.into_iter().map(MessageRowJson::into_message).collect()
@@ -509,7 +509,7 @@ impl PGMQueueExt for &mut PgConnection {
     async fn read_grouped_rr_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: VisibilityTimeoutOffset,
+        vt: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
@@ -519,7 +519,7 @@ impl PGMQueueExt for &mut PgConnection {
         let pi = poll_interval_to_ms(poll_interval);
         let rows: Vec<MessageRowJson> = sql_query(query::READ_GROUPED_RR_WITH_POLL)
             .bind::<sql_types::Text, _>(queue_name)
-            .bind::<sql_types::Integer, _>(vt.as_seconds())
+            .bind::<sql_types::Integer, _>(vt.into().as_seconds())
             .bind::<sql_types::Integer, _>(qty)
             .bind::<sql_types::Integer, _>(pt)
             .bind::<sql_types::Integer, _>(pi)
@@ -561,14 +561,16 @@ impl PGMQueueExt for &mut PgConnection {
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn delete(self, queue_name: &str, msg_id: i64) -> Result<bool, PgmqError> {
+        check_input(queue_name)?;
         let row: DeleteCol = sql_query(query::DELETE)
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::BigInt, _>(msg_id)
             .get_result(self)?;
-        Ok(row.delete)
+        Ok(row.was_deleted)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn delete_batch(self, queue_name: &str, msg_ids: &[i64]) -> Result<usize, PgmqError> {
+        check_input(queue_name)?;
         let rows: Vec<DeleteCol> = sql_query(query::DELETE_BATCH)
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::Array<sql_types::BigInt>, _>(msg_ids)
@@ -577,6 +579,7 @@ impl PGMQueueExt for &mut PgConnection {
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn create_fifo_index(self, queue_name: &str) -> Result<(), PgmqError> {
+        check_input(queue_name)?;
         sql_query(query::CREATE_FIFO_INDEX)
             .bind::<sql_types::Text, _>(queue_name)
             .execute(self)?;
@@ -624,7 +627,7 @@ impl PGMQueueExt for &mut PgConnection {
         routing_key: &str,
         message: &T,
         headers: Option<&H>,
-        delay: VisibilityTimeoutOffset,
+        delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<i32, PgmqError> {
         let message = serde_json::to_value(message)?;
         let headers = match headers {
@@ -635,7 +638,7 @@ impl PGMQueueExt for &mut PgConnection {
             .bind::<sql_types::Text, _>(routing_key)
             .bind::<sql_types::Jsonb, _>(message)
             .bind::<sql_types::Nullable<sql_types::Jsonb>, _>(headers)
-            .bind::<sql_types::Integer, _>(delay.as_seconds())
+            .bind::<sql_types::Integer, _>(delay.into().as_seconds())
             .get_result(self)?;
         Ok(row.send_topic)
     }
@@ -645,7 +648,7 @@ impl PGMQueueExt for &mut PgConnection {
         routing_key: &str,
         messages: &[T],
         headers: Option<&[H]>,
-        delay: VisibilityTimeoutOffset,
+        delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Vec<SendBatchTopicRow>, PgmqError> {
         let messages = serialize_list(messages)?;
         let headers = serialize_optional_list(headers)?;
@@ -653,7 +656,7 @@ impl PGMQueueExt for &mut PgConnection {
             .bind::<sql_types::Text, _>(routing_key)
             .bind::<sql_types::Array<sql_types::Jsonb>, _>(messages)
             .bind::<sql_types::Nullable<sql_types::Array<sql_types::Jsonb>>, _>(headers)
-            .bind::<sql_types::Integer, _>(delay.as_seconds())
+            .bind::<sql_types::Integer, _>(delay.into().as_seconds())
             .load(self)?)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
