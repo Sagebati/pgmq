@@ -795,23 +795,6 @@ impl Queue for &tokio_postgres::Client {
     ) -> Result<Message<T>, PgmqError> {
         imp::set_vt::<_, T>(self, queue_name, msg_id, visibility_timeout).await
     }
-    async fn send<T: Serialize + Send + Sync>(
-        self,
-        queue_name: &str,
-        message: &T,
-    ) -> Result<i64, PgmqError> {
-        self.send_delay(queue_name, message, VisibilityTimeoutOffset::seconds(0))
-            .await
-    }
-    async fn send_delay<T: Serialize + Send + Sync>(
-        self,
-        queue_name: &str,
-        message: &T,
-        delay: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<i64, PgmqError> {
-        self.send_delay_with_headers(queue_name, message, Option::<&()>::None, delay)
-            .await
-    }
     async fn send_delay_with_headers<T: Serialize + Send + Sync, H: Serialize + Send + Sync>(
         self,
         queue_name: &str,
@@ -820,23 +803,6 @@ impl Queue for &tokio_postgres::Client {
         delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<i64, PgmqError> {
         imp::send_delay_with_headers(self, queue_name, message, headers, delay).await
-    }
-    async fn send_batch<T: Serialize + Send + Sync>(
-        self,
-        queue_name: &str,
-        messages: &[T],
-    ) -> Result<Vec<i64>, PgmqError> {
-        self.send_batch_with_delay(queue_name, messages, VisibilityTimeoutOffset::seconds(0))
-            .await
-    }
-    async fn send_batch_with_delay<T: Serialize + Send + Sync>(
-        self,
-        queue_name: &str,
-        messages: &[T],
-        delay: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<Vec<i64>, PgmqError> {
-        self.send_batch_with_delay_with_headers(queue_name, messages, Option::<&[()]>::None, delay)
-            .await
     }
     async fn send_batch_with_delay_with_headers<
         T: Serialize + Send + Sync,
@@ -850,17 +816,6 @@ impl Queue for &tokio_postgres::Client {
     ) -> Result<Vec<i64>, PgmqError> {
         imp::send_batch_with_delay_with_headers(self, queue_name, messages, headers, delay).await
     }
-    async fn read<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
-        self,
-        queue_name: &str,
-        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<Option<Message<T>>, PgmqError> {
-        Ok(self
-            .read_batch::<T>(queue_name, visibility_timeout, 1)
-            .await?
-            .into_iter()
-            .next())
-    }
     async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
@@ -868,24 +823,6 @@ impl Queue for &tokio_postgres::Client {
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         imp::read_batch::<_, T>(self, queue_name, visibility_timeout, qty).await
-    }
-    async fn read_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
-        self,
-        queue_name: &str,
-        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
-        poll_timeout: Option<std::time::Duration>,
-        poll_interval: Option<std::time::Duration>,
-    ) -> Result<Option<Message<T>>, PgmqError> {
-        Ok(self
-            .read_batch_with_poll::<T>(
-                queue_name,
-                visibility_timeout,
-                1,
-                poll_timeout,
-                poll_interval,
-            )
-            .await?
-            .and_then(|v| v.into_iter().next()))
     }
     async fn read_batch_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
@@ -1091,23 +1028,6 @@ impl Queue for &tokio_postgres::Transaction<'_> {
     ) -> Result<Message<T>, PgmqError> {
         imp::set_vt::<_, T>(self, queue_name, msg_id, visibility_timeout).await
     }
-    async fn send<T: Serialize + Send + Sync>(
-        self,
-        queue_name: &str,
-        message: &T,
-    ) -> Result<i64, PgmqError> {
-        self.send_delay(queue_name, message, VisibilityTimeoutOffset::seconds(0))
-            .await
-    }
-    async fn send_delay<T: Serialize + Send + Sync>(
-        self,
-        queue_name: &str,
-        message: &T,
-        delay: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<i64, PgmqError> {
-        self.send_delay_with_headers(queue_name, message, Option::<&()>::None, delay)
-            .await
-    }
     async fn send_delay_with_headers<T: Serialize + Send + Sync, H: Serialize + Send + Sync>(
         self,
         queue_name: &str,
@@ -1116,23 +1036,6 @@ impl Queue for &tokio_postgres::Transaction<'_> {
         delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<i64, PgmqError> {
         imp::send_delay_with_headers(self, queue_name, message, headers, delay).await
-    }
-    async fn send_batch<T: Serialize + Send + Sync>(
-        self,
-        queue_name: &str,
-        messages: &[T],
-    ) -> Result<Vec<i64>, PgmqError> {
-        self.send_batch_with_delay(queue_name, messages, VisibilityTimeoutOffset::seconds(0))
-            .await
-    }
-    async fn send_batch_with_delay<T: Serialize + Send + Sync>(
-        self,
-        queue_name: &str,
-        messages: &[T],
-        delay: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<Vec<i64>, PgmqError> {
-        self.send_batch_with_delay_with_headers(queue_name, messages, Option::<&[()]>::None, delay)
-            .await
     }
     async fn send_batch_with_delay_with_headers<
         T: Serialize + Send + Sync,
@@ -1146,17 +1049,6 @@ impl Queue for &tokio_postgres::Transaction<'_> {
     ) -> Result<Vec<i64>, PgmqError> {
         imp::send_batch_with_delay_with_headers(self, queue_name, messages, headers, delay).await
     }
-    async fn read<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
-        self,
-        queue_name: &str,
-        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<Option<Message<T>>, PgmqError> {
-        Ok(self
-            .read_batch::<T>(queue_name, visibility_timeout, 1)
-            .await?
-            .into_iter()
-            .next())
-    }
     async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
@@ -1164,24 +1056,6 @@ impl Queue for &tokio_postgres::Transaction<'_> {
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         imp::read_batch::<_, T>(self, queue_name, visibility_timeout, qty).await
-    }
-    async fn read_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
-        self,
-        queue_name: &str,
-        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
-        poll_timeout: Option<std::time::Duration>,
-        poll_interval: Option<std::time::Duration>,
-    ) -> Result<Option<Message<T>>, PgmqError> {
-        Ok(self
-            .read_batch_with_poll::<T>(
-                queue_name,
-                visibility_timeout,
-                1,
-                poll_timeout,
-                poll_interval,
-            )
-            .await?
-            .and_then(|v| v.into_iter().next()))
     }
     async fn read_batch_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,

@@ -159,26 +159,6 @@ where
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn send<T: Serialize + Send + Sync>(
-        self,
-        queue_name: &str,
-        message: &T,
-    ) -> Result<i64, PgmqError> {
-        self.send_delay(queue_name, message, VisibilityTimeoutOffset::seconds(0))
-            .await
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn send_delay<T: Serialize + Send + Sync>(
-        self,
-        queue_name: &str,
-        message: &T,
-        delay: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<i64, PgmqError> {
-        self.send_delay_with_headers(queue_name, message, Option::<&()>::None, delay)
-            .await
-    }
-
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn send_delay_with_headers<T: Serialize + Send + Sync, H: Serialize + Send + Sync>(
         self,
@@ -201,27 +181,6 @@ where
             .bind(delay.into().as_seconds())
             .fetch_one(&mut *conn)
             .await?)
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn send_batch<T: Serialize + Send + Sync>(
-        self,
-        queue_name: &str,
-        messages: &[T],
-    ) -> Result<Vec<i64>, PgmqError> {
-        self.send_batch_with_delay(queue_name, messages, VisibilityTimeoutOffset::seconds(0))
-            .await
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn send_batch_with_delay<T: Serialize + Send + Sync>(
-        self,
-        queue_name: &str,
-        messages: &[T],
-        delay: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<Vec<i64>, PgmqError> {
-        self.send_batch_with_delay_with_headers(queue_name, messages, Option::<&[()]>::None, delay)
-            .await
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -249,19 +208,6 @@ where
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn read<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
-        self,
-        queue_name: &str,
-        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<Option<Message<T>>, PgmqError> {
-        Ok(self
-            .read_batch::<T>(queue_name, visibility_timeout, 1)
-            .await?
-            .into_iter()
-            .next())
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
@@ -276,26 +222,6 @@ where
             .bind(qty)
             .fetch_all(&mut *conn)
             .await?)
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn read_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
-        self,
-        queue_name: &str,
-        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
-        poll_timeout: Option<std::time::Duration>,
-        poll_interval: Option<std::time::Duration>,
-    ) -> Result<Option<Message<T>>, PgmqError> {
-        Ok(self
-            .read_batch_with_poll::<T>(
-                queue_name,
-                visibility_timeout,
-                1,
-                poll_timeout,
-                poll_interval,
-            )
-            .await?
-            .and_then(|v| v.into_iter().next()))
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]

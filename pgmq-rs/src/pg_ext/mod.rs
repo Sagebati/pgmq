@@ -110,19 +110,37 @@ pub trait Queue {
     ) -> Result<Message<T>, PgmqError>;
 
     /// Send a message. Returns its msg_id.
+    ///
+    /// Convenience over [`Self::send_delay_with_headers`] with a zero delay and no headers;
+    /// every driver gets the same default body. Adapters can override for a faster path,
+    /// but none currently do.
     async fn send<T: Serialize + Send + Sync>(
         self,
         queue_name: &str,
         message: &T,
-    ) -> Result<i64, PgmqError>;
+    ) -> Result<i64, PgmqError>
+    where
+        Self: Sized,
+    {
+        self.send_delay(queue_name, message, VisibilityTimeoutOffset::seconds(0))
+            .await
+    }
 
     /// Send a message with a delay (in seconds) before it becomes visible.
+    ///
+    /// Convenience over [`Self::send_delay_with_headers`] without headers.
     async fn send_delay<T: Serialize + Send + Sync>(
         self,
         queue_name: &str,
         message: &T,
         delay: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<i64, PgmqError>;
+    ) -> Result<i64, PgmqError>
+    where
+        Self: Sized,
+    {
+        self.send_delay_with_headers(queue_name, message, Option::<&()>::None, delay)
+            .await
+    }
 
     /// Send a message with optional headers and a delay.
     async fn send_delay_with_headers<T: Serialize + Send + Sync, H: Serialize + Send + Sync>(
@@ -134,18 +152,36 @@ pub trait Queue {
     ) -> Result<i64, PgmqError>;
 
     /// Send a batch of messages.
+    ///
+    /// Convenience over [`Self::send_batch_with_delay_with_headers`] with zero delay and no
+    /// headers.
     async fn send_batch<T: Serialize + Send + Sync>(
         self,
         queue_name: &str,
         messages: &[T],
-    ) -> Result<Vec<i64>, PgmqError>;
+    ) -> Result<Vec<i64>, PgmqError>
+    where
+        Self: Sized,
+    {
+        self.send_batch_with_delay(queue_name, messages, VisibilityTimeoutOffset::seconds(0))
+            .await
+    }
 
+    /// Send a batch of messages with a delay.
+    ///
+    /// Convenience over [`Self::send_batch_with_delay_with_headers`] without headers.
     async fn send_batch_with_delay<T: Serialize + Send + Sync>(
         self,
         queue_name: &str,
         messages: &[T],
         delay: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<Vec<i64>, PgmqError>;
+    ) -> Result<Vec<i64>, PgmqError>
+    where
+        Self: Sized,
+    {
+        self.send_batch_with_delay_with_headers(queue_name, messages, Option::<&[()]>::None, delay)
+            .await
+    }
 
     async fn send_batch_with_delay_with_headers<
         T: Serialize + Send + Sync,
@@ -158,11 +194,21 @@ pub trait Queue {
         delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Vec<i64>, PgmqError>;
 
+    /// Read one message — convenience over [`Self::read_batch`] with `qty = 1`.
     async fn read<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
         visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<Option<Message<T>>, PgmqError>;
+    ) -> Result<Option<Message<T>>, PgmqError>
+    where
+        Self: Sized,
+    {
+        Ok(self
+            .read_batch::<T>(queue_name, visibility_timeout, 1)
+            .await?
+            .into_iter()
+            .next())
+    }
 
     async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
@@ -171,13 +217,29 @@ pub trait Queue {
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError>;
 
+    /// Read one message, blocking on the server until one is available or `poll_timeout`
+    /// elapses. Convenience over [`Self::read_batch_with_poll`] with `max_batch_size = 1`.
     async fn read_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
         visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
-    ) -> Result<Option<Message<T>>, PgmqError>;
+    ) -> Result<Option<Message<T>>, PgmqError>
+    where
+        Self: Sized,
+    {
+        Ok(self
+            .read_batch_with_poll::<T>(
+                queue_name,
+                visibility_timeout,
+                1,
+                poll_timeout,
+                poll_interval,
+            )
+            .await?
+            .and_then(|v| v.into_iter().next()))
+    }
 
     async fn read_batch_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
