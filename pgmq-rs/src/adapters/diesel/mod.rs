@@ -216,7 +216,7 @@ mod async_impl {
         use super::*;
 
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn create(
+        pub async fn create(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
         ) -> Result<(), PgmqError> {
@@ -228,7 +228,7 @@ mod async_impl {
             Ok(())
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn create_unlogged(
+        pub async fn create_unlogged(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
         ) -> Result<(), PgmqError> {
@@ -240,7 +240,7 @@ mod async_impl {
             Ok(())
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn create_partitioned(
+        pub async fn create_partitioned(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
         ) -> Result<bool, PgmqError> {
@@ -260,7 +260,7 @@ mod async_impl {
             Ok(true)
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn convert_archive_partitioned(
+        pub async fn convert_archive_partitioned(
             conn: &mut AsyncPgConnection,
             table_name: &str,
             partition_interval: Option<&str>,
@@ -283,7 +283,7 @@ mod async_impl {
             Ok(())
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn drop_queue(
+        pub async fn drop_queue(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
         ) -> Result<(), PgmqError> {
@@ -295,7 +295,7 @@ mod async_impl {
             Ok(())
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn purge_queue(
+        pub async fn purge_queue(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
         ) -> Result<i64, PgmqError> {
@@ -307,7 +307,7 @@ mod async_impl {
             Ok(row.purge_queue)
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn list_queues(
+        pub async fn list_queues(
             conn: &mut AsyncPgConnection,
         ) -> Result<Option<Vec<PGMQueueMeta>>, PgmqError> {
             let rows: Vec<PGMQueueMeta> = sql_query(query::LIST_QUEUES).load(conn).await?;
@@ -318,7 +318,7 @@ mod async_impl {
             }
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn set_vt<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
+        pub async fn set_vt<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
             msg_id: i64,
@@ -335,7 +335,7 @@ mod async_impl {
         }
 
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn send_delay_with_headers<
+        pub async fn send_delay_with_headers<
             T: Serialize + Send + Sync,
             H: Serialize + Send + Sync,
         >(
@@ -358,7 +358,7 @@ mod async_impl {
             Ok(row.send)
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn send_batch_with_delay_with_headers<
+        pub async fn send_batch_with_delay_with_headers<
             T: Serialize + Send + Sync,
             H: Serialize + Send + Sync,
         >(
@@ -382,7 +382,7 @@ mod async_impl {
         }
 
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
+        pub async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
             visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
@@ -398,7 +398,7 @@ mod async_impl {
             rows.into_iter().map(MessageRowJson::into_message).collect()
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn read_batch_with_poll<
+        pub async fn read_batch_with_poll<
             T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
         >(
             conn: &mut AsyncPgConnection,
@@ -425,7 +425,7 @@ mod async_impl {
             rows.into_iter().map(MessageRowJson::into_message).collect()
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
+        pub async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
             visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
@@ -441,7 +441,7 @@ mod async_impl {
             rows.into_iter().map(MessageRowJson::into_message).collect()
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn read_grouped_with_poll<
+        pub async fn read_grouped_with_poll<
             T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
         >(
             conn: &mut AsyncPgConnection,
@@ -471,7 +471,7 @@ mod async_impl {
             rows.into_iter().map(MessageRowJson::into_message).collect()
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn read_grouped_head<
+        pub async fn read_grouped_head<
             T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
         >(
             conn: &mut AsyncPgConnection,
@@ -489,7 +489,7 @@ mod async_impl {
             rows.into_iter().map(MessageRowJson::into_message).collect()
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn read_grouped_rr<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
+        pub async fn read_grouped_rr<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
             visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
@@ -505,7 +505,7 @@ mod async_impl {
             rows.into_iter().map(MessageRowJson::into_message).collect()
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn read_grouped_rr_with_poll<
+        pub async fn read_grouped_rr_with_poll<
             T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
         >(
             conn: &mut AsyncPgConnection,
@@ -536,7 +536,7 @@ mod async_impl {
         }
 
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn archive(
+        pub async fn archive(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
             msg_id: i64,
@@ -550,7 +550,7 @@ mod async_impl {
             Ok(row.archive)
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn archive_batch(
+        pub async fn archive_batch(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
             msg_ids: &[i64],
@@ -564,7 +564,7 @@ mod async_impl {
             Ok(rows.len())
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn pop<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
+        pub async fn pop<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
         ) -> Result<Option<Message<T>>, PgmqError> {
@@ -579,7 +579,7 @@ mod async_impl {
             }
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn delete(
+        pub async fn delete(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
             msg_id: i64,
@@ -593,7 +593,7 @@ mod async_impl {
             Ok(row.was_deleted)
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn delete_batch(
+        pub async fn delete_batch(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
             msg_ids: &[i64],
@@ -608,7 +608,7 @@ mod async_impl {
         }
 
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn create_fifo_index(
+        pub async fn create_fifo_index(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
         ) -> Result<(), PgmqError> {
@@ -620,7 +620,7 @@ mod async_impl {
             Ok(())
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn create_fifo_indexes_all(
+        pub async fn create_fifo_indexes_all(
             conn: &mut AsyncPgConnection,
         ) -> Result<(), PgmqError> {
             sql_query(query::CREATE_FIFO_INDEXES_ALL)
@@ -629,7 +629,7 @@ mod async_impl {
             Ok(())
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn bind_topic(
+        pub async fn bind_topic(
             conn: &mut AsyncPgConnection,
             pattern: &str,
             queue_name: &str,
@@ -643,7 +643,7 @@ mod async_impl {
             Ok(())
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn unbind_topic(
+        pub async fn unbind_topic(
             conn: &mut AsyncPgConnection,
             pattern: &str,
             queue_name: &str,
@@ -657,7 +657,7 @@ mod async_impl {
             Ok(())
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn list_topic_bindings(
+        pub async fn list_topic_bindings(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
         ) -> Result<Vec<ListTopicBindingsRow>, PgmqError> {
@@ -667,13 +667,13 @@ mod async_impl {
                 .await?)
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn list_topic_bindings_all(
+        pub async fn list_topic_bindings_all(
             conn: &mut AsyncPgConnection,
         ) -> Result<Vec<ListTopicBindingsRow>, PgmqError> {
             Ok(sql_query(query::LIST_TOPIC_BINDINGS_ALL).load(conn).await?)
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn send_topic<T: Serialize + Send + Sync, H: Serialize + Send + Sync>(
+        pub async fn send_topic<T: Serialize + Send + Sync, H: Serialize + Send + Sync>(
             conn: &mut AsyncPgConnection,
             routing_key: &str,
             message: &T,
@@ -692,7 +692,7 @@ mod async_impl {
             Ok(row.send_topic)
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn send_batch_topic<
+        pub async fn send_batch_topic<
             T: Serialize + Send + Sync,
             H: Serialize + Send + Sync,
         >(
@@ -714,7 +714,7 @@ mod async_impl {
         }
 
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn enable_notify_insert(
+        pub async fn enable_notify_insert(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
             throttle: std::time::Duration,
@@ -729,7 +729,7 @@ mod async_impl {
             Ok(())
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn disable_notify_insert(
+        pub async fn disable_notify_insert(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
         ) -> Result<(), PgmqError> {
@@ -741,7 +741,7 @@ mod async_impl {
             Ok(())
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn update_notify_insert(
+        pub async fn update_notify_insert(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
             throttle: std::time::Duration,
@@ -756,7 +756,7 @@ mod async_impl {
             Ok(())
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn list_notify_insert_throttles(
+        pub async fn list_notify_insert_throttles(
             conn: &mut AsyncPgConnection,
         ) -> Result<Vec<ListNotifyInsertThrottlesRow>, PgmqError> {
             Ok(sql_query(query::LIST_NOTIFY_INSERT_THROTTLES)
@@ -764,7 +764,7 @@ mod async_impl {
                 .await?)
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn metrics(
+        pub async fn metrics(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
         ) -> Result<QueueMetrics, PgmqError> {
@@ -775,7 +775,7 @@ mod async_impl {
                 .await?)
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub(super) async fn metrics_all(
+        pub async fn metrics_all(
             conn: &mut AsyncPgConnection,
         ) -> Result<Vec<QueueMetrics>, PgmqError> {
             Ok(sql_query(query::METRICS_ALL).load(conn).await?)

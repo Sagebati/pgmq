@@ -202,7 +202,7 @@ mod imp {
     use super::*;
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn create<C: GenericClient + Sync>(
+    pub async fn create<C: GenericClient + Sync>(
         conn: &C,
         queue_name: &str,
     ) -> Result<(), PgmqError> {
@@ -211,7 +211,7 @@ mod imp {
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn create_unlogged<C: GenericClient + Sync>(
+    pub async fn create_unlogged<C: GenericClient + Sync>(
         conn: &C,
         queue_name: &str,
     ) -> Result<(), PgmqError> {
@@ -220,7 +220,7 @@ mod imp {
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn create_partitioned<C: GenericClient + Sync>(
+    pub async fn create_partitioned<C: GenericClient + Sync>(
         conn: &C,
         queue_name: &str,
     ) -> Result<bool, PgmqError> {
@@ -237,7 +237,7 @@ mod imp {
         Ok(true)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn convert_archive_partitioned<C: GenericClient + Sync>(
+    pub async fn convert_archive_partitioned<C: GenericClient + Sync>(
         conn: &C,
         table_name: &str,
         partition_interval: Option<&str>,
@@ -258,7 +258,7 @@ mod imp {
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn drop_queue<C: GenericClient + Sync>(
+    pub async fn drop_queue<C: GenericClient + Sync>(
         conn: &C,
         queue_name: &str,
     ) -> Result<(), PgmqError> {
@@ -267,7 +267,7 @@ mod imp {
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn purge_queue<C: GenericClient + Sync>(
+    pub async fn purge_queue<C: GenericClient + Sync>(
         conn: &C,
         queue_name: &str,
     ) -> Result<i64, PgmqError> {
@@ -276,7 +276,7 @@ mod imp {
         Ok(row.try_get("purge_queue")?)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn list_queues<C: GenericClient + Sync>(
+    pub async fn list_queues<C: GenericClient + Sync>(
         conn: &C,
     ) -> Result<Option<Vec<PGMQueueMeta>>, PgmqError> {
         let rows = conn.query(query::LIST_QUEUES, &[]).await?;
@@ -289,7 +289,7 @@ mod imp {
             .map(Some)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn set_vt<
+    pub async fn set_vt<
         C: GenericClient + Sync,
         T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
     >(
@@ -307,7 +307,7 @@ mod imp {
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn send_delay_with_headers<
+    pub async fn send_delay_with_headers<
         C: GenericClient + Sync,
         T: Serialize + Send + Sync,
         H: Serialize + Send + Sync,
@@ -328,7 +328,7 @@ mod imp {
         Ok(row.try_get("send")?)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn send_batch_with_delay_with_headers<
+    pub async fn send_batch_with_delay_with_headers<
         C: GenericClient + Sync,
         T: Serialize + Send + Sync,
         H: Serialize + Send + Sync,
@@ -355,7 +355,7 @@ mod imp {
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn read_batch<
+    pub async fn read_batch<
         C: GenericClient + Sync,
         T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
     >(
@@ -373,7 +373,7 @@ mod imp {
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn read_batch_with_poll<
+    pub async fn read_batch_with_poll<
         C: GenericClient + Sync,
         T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
     >(
@@ -403,7 +403,7 @@ mod imp {
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn read_grouped<
+    pub async fn read_grouped<
         C: GenericClient + Sync,
         T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
     >(
@@ -422,7 +422,7 @@ mod imp {
             .collect()
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn read_grouped_with_poll<
+    pub async fn read_grouped_with_poll<
         C: GenericClient + Sync,
         T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
     >(
@@ -452,7 +452,7 @@ mod imp {
             .collect()
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn read_grouped_head<
+    pub async fn read_grouped_head<
         C: GenericClient + Sync,
         T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
     >(
@@ -471,7 +471,7 @@ mod imp {
             .collect()
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn read_grouped_rr<
+    pub async fn read_grouped_rr<
         C: GenericClient + Sync,
         T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
     >(
@@ -490,7 +490,7 @@ mod imp {
             .collect()
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn read_grouped_rr_with_poll<
+    pub async fn read_grouped_rr_with_poll<
         C: GenericClient + Sync,
         T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
     >(
@@ -521,7 +521,7 @@ mod imp {
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn archive<C: GenericClient + Sync>(
+    pub async fn archive<C: GenericClient + Sync>(
         conn: &C,
         queue_name: &str,
         msg_id: i64,
@@ -531,7 +531,7 @@ mod imp {
         Ok(row.try_get("archive")?)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn archive_batch<C: GenericClient + Sync>(
+    pub async fn archive_batch<C: GenericClient + Sync>(
         conn: &C,
         queue_name: &str,
         msg_ids: &[i64],
@@ -543,7 +543,7 @@ mod imp {
         Ok(rows.len())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn pop<
+    pub async fn pop<
         C: GenericClient + Sync,
         T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
     >(
@@ -557,7 +557,7 @@ mod imp {
             .transpose()
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn delete<C: GenericClient + Sync>(
+    pub async fn delete<C: GenericClient + Sync>(
         conn: &C,
         queue_name: &str,
         msg_id: i64,
@@ -567,7 +567,7 @@ mod imp {
         Ok(row.try_get("was_deleted")?)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn delete_batch<C: GenericClient + Sync>(
+    pub async fn delete_batch<C: GenericClient + Sync>(
         conn: &C,
         queue_name: &str,
         msg_ids: &[i64],
@@ -580,7 +580,7 @@ mod imp {
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn create_fifo_index<C: GenericClient + Sync>(
+    pub async fn create_fifo_index<C: GenericClient + Sync>(
         conn: &C,
         queue_name: &str,
     ) -> Result<(), PgmqError> {
@@ -589,14 +589,14 @@ mod imp {
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn create_fifo_indexes_all<C: GenericClient + Sync>(
+    pub async fn create_fifo_indexes_all<C: GenericClient + Sync>(
         conn: &C,
     ) -> Result<(), PgmqError> {
         conn.execute(query::CREATE_FIFO_INDEXES_ALL, &[]).await?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn bind_topic<C: GenericClient + Sync>(
+    pub async fn bind_topic<C: GenericClient + Sync>(
         conn: &C,
         pattern: &str,
         queue_name: &str,
@@ -607,7 +607,7 @@ mod imp {
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn unbind_topic<C: GenericClient + Sync>(
+    pub async fn unbind_topic<C: GenericClient + Sync>(
         conn: &C,
         pattern: &str,
         queue_name: &str,
@@ -618,7 +618,7 @@ mod imp {
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn list_topic_bindings<C: GenericClient + Sync>(
+    pub async fn list_topic_bindings<C: GenericClient + Sync>(
         conn: &C,
         queue_name: &str,
     ) -> Result<Vec<ListTopicBindingsRow>, PgmqError> {
@@ -628,7 +628,7 @@ mod imp {
             .collect()
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn list_topic_bindings_all<C: GenericClient + Sync>(
+    pub async fn list_topic_bindings_all<C: GenericClient + Sync>(
         conn: &C,
     ) -> Result<Vec<ListTopicBindingsRow>, PgmqError> {
         let rows = conn.query(query::LIST_TOPIC_BINDINGS_ALL, &[]).await?;
@@ -637,7 +637,7 @@ mod imp {
             .collect()
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn send_topic<
+    pub async fn send_topic<
         C: GenericClient + Sync,
         T: Serialize + Send + Sync,
         H: Serialize + Send + Sync,
@@ -660,7 +660,7 @@ mod imp {
         Ok(row.try_get("send_topic")?)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn send_batch_topic<
+    pub async fn send_batch_topic<
         C: GenericClient + Sync,
         T: Serialize + Send + Sync,
         H: Serialize + Send + Sync,
@@ -686,7 +686,7 @@ mod imp {
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn enable_notify_insert<C: GenericClient + Sync>(
+    pub async fn enable_notify_insert<C: GenericClient + Sync>(
         conn: &C,
         queue_name: &str,
         throttle: std::time::Duration,
@@ -698,7 +698,7 @@ mod imp {
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn disable_notify_insert<C: GenericClient + Sync>(
+    pub async fn disable_notify_insert<C: GenericClient + Sync>(
         conn: &C,
         queue_name: &str,
     ) -> Result<(), PgmqError> {
@@ -708,7 +708,7 @@ mod imp {
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn update_notify_insert<C: GenericClient + Sync>(
+    pub async fn update_notify_insert<C: GenericClient + Sync>(
         conn: &C,
         queue_name: &str,
         throttle: std::time::Duration,
@@ -720,7 +720,7 @@ mod imp {
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn list_notify_insert_throttles<C: GenericClient + Sync>(
+    pub async fn list_notify_insert_throttles<C: GenericClient + Sync>(
         conn: &C,
     ) -> Result<Vec<ListNotifyInsertThrottlesRow>, PgmqError> {
         let rows = conn.query(query::LIST_NOTIFY_INSERT_THROTTLES, &[]).await?;
@@ -729,7 +729,7 @@ mod imp {
             .collect()
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn metrics<C: GenericClient + Sync>(
+    pub async fn metrics<C: GenericClient + Sync>(
         conn: &C,
         queue_name: &str,
     ) -> Result<QueueMetrics, PgmqError> {
@@ -738,7 +738,7 @@ mod imp {
         QueueMetrics::from_tokio_postgres_row(&row)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub(super) async fn metrics_all<C: GenericClient + Sync>(
+    pub async fn metrics_all<C: GenericClient + Sync>(
         conn: &C,
     ) -> Result<Vec<QueueMetrics>, PgmqError> {
         let rows = conn.query(query::METRICS_ALL, &[]).await?;
