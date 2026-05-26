@@ -4,20 +4,32 @@
 //! The `internal` module itself is declared `mod internal` (private) in `install/mod.rs`, so
 //! external callers cannot reach `pgmq::install::internal::*`.
 
+#[cfg(any(feature = "install-sql-embedded", feature = "install-sql-github"))]
 use crate::install::script::MigrationScript;
 use crate::install::version::Version;
 #[cfg(feature = "install-sql-github")]
 use crate::PgmqError;
 
-/// A row from `pgmq.__pgmq_migrations`.
+/// A row from `pgmq.__pgmq_migrations`. The `name` field is only consumed by the embedded and
+/// GitHub install paths (via `filter_unapplied_scripts`) — `installed_version` only needs
+/// `version`. Under a minimal `install-sql` build we still decode `name` from the SQL row to
+/// keep the install module's SQL surface uniform across paths.
 #[derive(Debug)]
 pub struct AppliedMigration {
+    #[cfg_attr(
+        not(any(feature = "install-sql-embedded", feature = "install-sql-github")),
+        expect(
+            dead_code,
+            reason = "decoded for SQL uniformity; consumed only by filter_unapplied_scripts"
+        )
+    )]
     pub name: String,
     pub version: Version,
 }
 
 /// Given the list of available migration scripts plus the list of already-applied migrations,
 /// return the subset that still needs to be applied, ordered for execution.
+#[cfg(any(feature = "install-sql-embedded", feature = "install-sql-github"))]
 pub fn filter_unapplied_scripts(
     available: Vec<MigrationScript>,
     applied: &[AppliedMigration],
@@ -30,7 +42,9 @@ pub fn filter_unapplied_scripts(
         .collect()
 }
 
-/// Find the maximum version among already-applied migrations.
+/// Find the maximum version among already-applied migrations. Only the GitHub install path
+/// needs this — to pick the right script range to fetch over the wire.
+#[cfg(feature = "install-sql-github")]
 pub fn max_applied_version(applied: &[AppliedMigration]) -> Option<&Version> {
     applied.iter().map(|mig| &mig.version).max()
 }

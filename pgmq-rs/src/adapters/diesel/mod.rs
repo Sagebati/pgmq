@@ -74,7 +74,7 @@
 //! use diesel_async::RunQueryDsl;
 //!
 //! let mut conn = pool.get().await?;
-//! conn.transaction::<_, pgmq::PgmqError, _>(|conn| async move {
+//! conn.transaction::<_, pgmq::PgmqError, _>(async |conn| {
 //!     // Your own diesel work in the tx:
 //!     diesel::sql_query("INSERT INTO orders (id, total) VALUES ($1, $2)")
 //!         .bind::<diesel::sql_types::BigInt, _>(order_id)
@@ -84,7 +84,8 @@
 //!     // pgmq in the same tx — direct on conn:
 //!     conn.send("orders_q", &order).await?;
 //!     Ok(())
-//! }.scope_boxed()).await?;
+//! })
+//! .await?;
 //! ```
 //!
 //! ## One-connection workflow (no pool, async)
@@ -131,16 +132,34 @@ struct SendTopicCol {
     send_topic: i32,
 }
 
+// pgmq.archive(text, bigint) returns BOOLEAN.
 #[derive(QueryableByName)]
 struct ArchiveCol {
     #[diesel(sql_type = sql_types::Bool)]
     archive: bool,
 }
 
+// pgmq.delete(text, bigint) returns BOOLEAN.
 #[derive(QueryableByName)]
 struct DeleteCol {
     #[diesel(sql_type = sql_types::Bool)]
     was_deleted: bool,
+}
+
+// pgmq.archive(text, bigint[]) returns SETOF BIGINT — the msg_ids actually archived.
+// We only count rows; the id values are decoded into `_msg_id` and discarded.
+#[derive(QueryableByName)]
+struct ArchiveBatchCol {
+    #[diesel(sql_type = sql_types::BigInt, column_name = "archive")]
+    _msg_id: i64,
+}
+
+// pgmq.delete(text, bigint[]) returns SETOF BIGINT — the msg_ids actually deleted.
+// We only count rows; the id values are decoded into `_msg_id` and discarded.
+#[derive(QueryableByName)]
+struct DeleteBatchCol {
+    #[diesel(sql_type = sql_types::BigInt, column_name = "was_deleted")]
+    _msg_id: i64,
 }
 
 #[derive(QueryableByName)]
@@ -398,9 +417,7 @@ mod async_impl {
             rows.into_iter().map(MessageRowJson::into_message).collect()
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub async fn read_batch_with_poll<
-            T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
-        >(
+        pub async fn read_batch_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
             visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
@@ -452,10 +469,8 @@ mod async_impl {
             poll_interval: Option<std::time::Duration>,
         ) -> Result<Vec<Message<T>>, PgmqError> {
             check_input(queue_name)?;
-            let sql = query::read_grouped_with_poll_sql(
-                poll_timeout.is_some(),
-                poll_interval.is_some(),
-            );
+            let sql =
+                query::read_grouped_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
             let mut qb = sql_query(sql)
                 .into_boxed::<Pg>()
                 .bind::<sql_types::Text, _>(queue_name)
@@ -471,9 +486,7 @@ mod async_impl {
             rows.into_iter().map(MessageRowJson::into_message).collect()
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub async fn read_grouped_head<
-            T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
-        >(
+        pub async fn read_grouped_head<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
             conn: &mut AsyncPgConnection,
             queue_name: &str,
             visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
@@ -556,7 +569,7 @@ mod async_impl {
             msg_ids: &[i64],
         ) -> Result<usize, PgmqError> {
             check_input(queue_name)?;
-            let rows: Vec<ArchiveCol> = sql_query(query::ARCHIVE_BATCH)
+            let rows: Vec<ArchiveBatchCol> = sql_query(query::ARCHIVE_BATCH)
                 .bind::<sql_types::Text, _>(queue_name)
                 .bind::<sql_types::Array<sql_types::BigInt>, _>(msg_ids)
                 .load(conn)
@@ -599,7 +612,7 @@ mod async_impl {
             msg_ids: &[i64],
         ) -> Result<usize, PgmqError> {
             check_input(queue_name)?;
-            let rows: Vec<DeleteCol> = sql_query(query::DELETE_BATCH)
+            let rows: Vec<DeleteBatchCol> = sql_query(query::DELETE_BATCH)
                 .bind::<sql_types::Text, _>(queue_name)
                 .bind::<sql_types::Array<sql_types::BigInt>, _>(msg_ids)
                 .load(conn)
@@ -692,10 +705,7 @@ mod async_impl {
             Ok(row.send_topic)
         }
         #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-        pub async fn send_batch_topic<
-            T: Serialize + Send + Sync,
-            H: Serialize + Send + Sync,
-        >(
+        pub async fn send_batch_topic<T: Serialize + Send + Sync, H: Serialize + Send + Sync>(
             conn: &mut AsyncPgConnection,
             routing_key: &str,
             messages: &[T],
@@ -861,18 +871,16 @@ mod async_impl {
             qty: i32,
             poll_timeout: Option<std::time::Duration>,
             poll_interval: Option<std::time::Duration>,
-        ) -> Result<Option<Vec<Message<T>>>, PgmqError> {
-            Ok(Some(
-                imp::read_batch_with_poll::<T>(
-                    self,
-                    queue_name,
-                    visibility_timeout,
-                    qty,
-                    poll_timeout,
-                    poll_interval,
-                )
-                .await?,
-            ))
+        ) -> Result<Vec<Message<T>>, PgmqError> {
+            imp::read_batch_with_poll::<T>(
+                self,
+                queue_name,
+                visibility_timeout,
+                qty,
+                poll_timeout,
+                poll_interval,
+            )
+            .await
         }
         async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
             self,
@@ -916,7 +924,9 @@ mod async_impl {
         ) -> Result<Vec<Message<T>>, PgmqError> {
             imp::read_grouped_rr::<T>(self, queue_name, visibility_timeout, qty).await
         }
-        async fn read_grouped_rr_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
+        async fn read_grouped_rr_with_poll<
+            T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
+        >(
             self,
             queue_name: &str,
             visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
@@ -953,11 +963,7 @@ mod async_impl {
         async fn delete(self, queue_name: &str, msg_id: i64) -> Result<bool, PgmqError> {
             imp::delete(self, queue_name, msg_id).await
         }
-        async fn delete_batch(
-            self,
-            queue_name: &str,
-            msg_ids: &[i64],
-        ) -> Result<usize, PgmqError> {
+        async fn delete_batch(self, queue_name: &str, msg_ids: &[i64]) -> Result<usize, PgmqError> {
             imp::delete_batch(self, queue_name, msg_ids).await
         }
         async fn create_fifo_index(self, queue_name: &str) -> Result<(), PgmqError> {

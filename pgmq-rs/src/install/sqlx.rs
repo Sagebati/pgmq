@@ -4,7 +4,9 @@
 use super::internal::*;
 use super::Version;
 use crate::errors::PgmqError;
-use crate::install::script::{ParsedScriptName, ScriptFetcher};
+use crate::install::script::ParsedScriptName;
+#[cfg(feature = "install-sql-github")]
+use crate::install::script::ScriptFetcher;
 use sqlx::{PgPool, Postgres, Transaction};
 use std::str::FromStr;
 
@@ -45,28 +47,40 @@ pub async fn install_sql_from_github(
     pool: &PgPool,
     version: Option<&str>,
 ) -> Result<(), PgmqError> {
+    // Observe the installed version in a short read transaction, release the lock, do the
+    // network fetch, then reacquire the lock for the apply transaction. Holding the migrations
+    // advisory lock across network I/O would block other installers for the duration of the
+    // HTTP round trip; `filter_unapplied_scripts` defends against races inside the apply tx.
+    let mut tx = pool.begin().await?;
+    create_migrations_table(&mut tx).await?;
+    let installed_version = max_applied_version(&fetch_applied(&mut tx).await?).cloned();
+    tx.commit().await?;
+
     let fetcher = super::internal::github_fetcher(version).await?;
-    install_sql(pool, fetcher).await
+    let available = fetcher.fetch(installed_version.as_ref()).await?;
+    apply_scripts(pool, available).await
 }
 
 #[cfg(feature = "install-sql-embedded")]
 #[doc = include_str!("./embedded/install_sql_embedded.md")]
 pub async fn install_sql_from_embedded(pool: &PgPool) -> Result<(), PgmqError> {
-    install_sql(pool, embedded_fetcher()).await
+    // Embedded fetcher is in-memory only — fetch all scripts up front, then apply inside a
+    // single transaction that holds the advisory lock across the whole install.
+    let available = embedded_fetcher().fetch_sync(None)?;
+    apply_scripts(pool, available).await
 }
 
-async fn install_sql(pool: &PgPool, script_fetcher: impl ScriptFetcher) -> Result<(), PgmqError> {
+#[cfg(any(feature = "install-sql-embedded", feature = "install-sql-github"))]
+async fn apply_scripts(
+    pool: &PgPool,
+    available: Vec<crate::install::script::MigrationScript>,
+) -> Result<(), PgmqError> {
     let mut tx = pool.begin().await?;
     create_migrations_table(&mut tx).await?;
-
     let applied = fetch_applied(&mut tx).await?;
-    let installed_version = max_applied_version(&applied).cloned();
-
-    let available = script_fetcher.fetch(installed_version.as_ref()).await?;
     let to_apply = filter_unapplied_scripts(available, &applied);
 
     for script in &to_apply {
-        // Run the migration script's SQL.
         {
             use futures_util::StreamExt;
             use sqlx::Executor;
@@ -75,7 +89,6 @@ async fn install_sql(pool: &PgPool, script_fetcher: impl ScriptFetcher) -> Resul
                 let _ = step?;
             }
         }
-        // Record it as applied.
         insert_applied(&mut tx, &script.name).await?;
     }
 

@@ -6,7 +6,9 @@
 use super::internal::*;
 use super::Version;
 use crate::errors::PgmqError;
-use crate::install::script::{ParsedScriptName, ScriptFetcher};
+use crate::install::script::ParsedScriptName;
+#[cfg(feature = "install-sql-github")]
+use crate::install::script::ScriptFetcher;
 use std::str::FromStr;
 use tokio_postgres::{Client, Transaction};
 
@@ -47,31 +49,40 @@ pub async fn install_sql_from_github(
     client: &mut Client,
     version: Option<&str>,
 ) -> Result<(), PgmqError> {
+    // Observe the installed version in a short read transaction, release the lock, do the
+    // network fetch, then reacquire the lock for the apply transaction. Holding the migrations
+    // advisory lock across network I/O would block other installers for the duration of the
+    // HTTP round trip; `filter_unapplied_scripts` defends against races inside the apply tx.
+    let tx = client.transaction().await?;
+    create_migrations_table(&tx).await?;
+    let installed_version = max_applied_version(&fetch_applied(&tx).await?).cloned();
+    tx.commit().await?;
+
     let fetcher = super::internal::github_fetcher(version).await?;
-    install_sql(client, fetcher).await
+    let available = fetcher.fetch(installed_version.as_ref()).await?;
+    apply_scripts(client, available).await
 }
 
 #[cfg(feature = "install-sql-embedded")]
 #[doc = include_str!("./embedded/install_sql_embedded.md")]
 pub async fn install_sql_from_embedded(client: &mut Client) -> Result<(), PgmqError> {
-    install_sql(client, embedded_fetcher()).await
+    // Embedded fetcher is in-memory only — fetch all scripts up front, then apply inside a
+    // single transaction that holds the advisory lock across the whole install.
+    let available = embedded_fetcher().fetch_sync(None)?;
+    apply_scripts(client, available).await
 }
 
-async fn install_sql(
+#[cfg(any(feature = "install-sql-embedded", feature = "install-sql-github"))]
+async fn apply_scripts(
     client: &mut Client,
-    script_fetcher: impl ScriptFetcher,
+    available: Vec<crate::install::script::MigrationScript>,
 ) -> Result<(), PgmqError> {
     let tx = client.transaction().await?;
     create_migrations_table(&tx).await?;
-
     let applied = fetch_applied(&tx).await?;
-    let installed_version = max_applied_version(&applied).cloned();
-
-    let available = script_fetcher.fetch(installed_version.as_ref()).await?;
     let to_apply = filter_unapplied_scripts(available, &applied);
 
     for script in &to_apply {
-        // Run the migration script's SQL (may contain multiple statements).
         tx.batch_execute(&script.content).await?;
         insert_applied(&tx, &script.name).await?;
     }
@@ -89,14 +100,16 @@ async fn fetch_applied(tx: &Transaction<'_>) -> Result<Vec<AppliedMigration>, Pg
     let rows = tx.query(SELECT_APPLIED_MIGRATIONS_SQL, &[]).await?;
     rows.into_iter()
         .map(|row| {
-            let name: String = row.try_get(0).map_err(|e| PgmqError::RowDecodeError {
+            let name: String = row.try_get("name").map_err(|e| PgmqError::RowDecodeError {
                 column: "name".into(),
                 reason: e.to_string(),
             })?;
-            let ver: String = row.try_get(1).map_err(|e| PgmqError::RowDecodeError {
-                column: "version".into(),
-                reason: e.to_string(),
-            })?;
+            let ver: String = row
+                .try_get("version")
+                .map_err(|e| PgmqError::RowDecodeError {
+                    column: "version".into(),
+                    reason: e.to_string(),
+                })?;
             Ok(AppliedMigration {
                 name,
                 version: Version::from_str(&ver)?,

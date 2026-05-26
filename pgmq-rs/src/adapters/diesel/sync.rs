@@ -117,8 +117,8 @@
 //! [async]: crate::adapters::diesel
 
 use super::{
-    ArchiveCol, DeleteCol, ExistsCol, MessageRowJson, PurgeQueueCol, SendBatchCol, SendCol,
-    SendTopicCol,
+    ArchiveBatchCol, ArchiveCol, DeleteBatchCol, DeleteCol, ExistsCol, MessageRowJson,
+    PurgeQueueCol, SendBatchCol, SendCol, SendTopicCol,
 };
 use crate::adapters::helpers::check_input;
 use crate::adapters::helpers::{
@@ -297,7 +297,7 @@ impl Queue for &mut PgConnection {
         max_batch_size: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
-    ) -> Result<Option<Vec<Message<T>>>, PgmqError> {
+    ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let sql = query::read_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
         let mut qb = sql_query(sql)
@@ -312,11 +312,7 @@ impl Queue for &mut PgConnection {
             qb = qb.bind::<sql_types::Integer, _>(duration_as_ms_i32(interval));
         }
         let rows: Vec<MessageRowJson> = qb.load(self)?;
-        Ok(Some(
-            rows.into_iter()
-                .map(MessageRowJson::into_message)
-                .collect::<Result<Vec<_>, _>>()?,
-        ))
+        rows.into_iter().map(MessageRowJson::into_message).collect()
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
@@ -427,7 +423,7 @@ impl Queue for &mut PgConnection {
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn archive_batch(self, queue_name: &str, msg_ids: &[i64]) -> Result<usize, PgmqError> {
         check_input(queue_name)?;
-        let rows: Vec<ArchiveCol> = sql_query(query::ARCHIVE_BATCH)
+        let rows: Vec<ArchiveBatchCol> = sql_query(query::ARCHIVE_BATCH)
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::Array<sql_types::BigInt>, _>(msg_ids)
             .load(self)?;
@@ -460,7 +456,7 @@ impl Queue for &mut PgConnection {
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn delete_batch(self, queue_name: &str, msg_ids: &[i64]) -> Result<usize, PgmqError> {
         check_input(queue_name)?;
-        let rows: Vec<DeleteCol> = sql_query(query::DELETE_BATCH)
+        let rows: Vec<DeleteBatchCol> = sql_query(query::DELETE_BATCH)
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::Array<sql_types::BigInt>, _>(msg_ids)
             .load(self)?;

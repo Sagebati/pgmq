@@ -4,7 +4,9 @@
 use super::internal::*;
 use super::Version;
 use crate::errors::PgmqError;
-use crate::install::script::{ParsedScriptName, ScriptFetcher};
+use crate::install::script::ParsedScriptName;
+#[cfg(feature = "install-sql-github")]
+use crate::install::script::ScriptFetcher;
 use diesel::sql_types;
 use diesel::{sql_query, QueryableByName};
 use diesel_async::pooled_connection::deadpool::Pool;
@@ -64,23 +66,12 @@ pub async fn install_sql_from_github(
     pool: &Pool<AsyncPgConnection>,
     version: Option<&str>,
 ) -> Result<(), PgmqError> {
-    let fetcher = super::internal::github_fetcher(version).await?;
-    install_sql(pool, fetcher).await
-}
-
-#[cfg(feature = "install-sql-embedded")]
-#[doc = include_str!("./embedded/install_sql_embedded.md")]
-pub async fn install_sql_from_embedded(pool: &Pool<AsyncPgConnection>) -> Result<(), PgmqError> {
-    install_sql(pool, embedded_fetcher()).await
-}
-
-async fn install_sql<F: ScriptFetcher + Send>(
-    pool: &Pool<AsyncPgConnection>,
-    script_fetcher: F,
-) -> Result<(), PgmqError> {
     let mut conn = pool.get().await?;
 
-    // Fetch scripts outside the transaction (network IO for the github fetcher).
+    // GitHub fetcher does network I/O that we don't want to hold inside the install transaction,
+    // so we observe the installed version in a short read transaction, release the lock, fetch,
+    // then reacquire the lock for the apply transaction. `filter_unapplied_scripts` defends
+    // against another installer racing in between by skipping anything already applied.
     let installed_version_opt = conn
         .transaction::<_, PgmqError, _>(async |conn| {
             create_migrations_table(conn).await?;
@@ -88,16 +79,37 @@ async fn install_sql<F: ScriptFetcher + Send>(
             Ok(max_applied_version(&applied).cloned())
         })
         .await?;
-    let available = script_fetcher.fetch(installed_version_opt.as_ref()).await?;
+    let fetcher = super::internal::github_fetcher(version).await?;
+    let available = fetcher.fetch(installed_version_opt.as_ref()).await?;
 
+    apply_scripts(&mut conn, available).await
+}
+
+#[cfg(feature = "install-sql-embedded")]
+#[doc = include_str!("./embedded/install_sql_embedded.md")]
+pub async fn install_sql_from_embedded(pool: &Pool<AsyncPgConnection>) -> Result<(), PgmqError> {
+    let mut conn = pool.get().await?;
+    // Embedded fetcher is in-memory only — fetch all scripts up front, then apply inside a
+    // single transaction that holds the advisory lock across the whole install.
+    let available = embedded_fetcher().fetch_sync(None)?;
+    apply_scripts(&mut conn, available).await
+}
+
+#[cfg(any(feature = "install-sql-embedded", feature = "install-sql-github"))]
+async fn apply_scripts(
+    conn: &mut AsyncPgConnection,
+    available: Vec<crate::install::script::MigrationScript>,
+) -> Result<(), PgmqError> {
     conn.transaction::<_, PgmqError, _>(async |conn| {
         create_migrations_table(conn).await?;
         let applied = fetch_applied(conn).await?;
         let to_apply = filter_unapplied_scripts(available, &applied);
 
         for script in &to_apply {
-            // Multi-statement migration SQL — postgres splits at semicolons.
-            sql_query(script.content.as_ref()).execute(conn).await?;
+            // Migration scripts contain many semicolon-separated statements. `sql_query` uses
+            // the extended-query protocol (one prepared statement at a time), so we go through
+            // `batch_execute` which uses the simple-query protocol that splits at semicolons.
+            conn.batch_execute(&script.content).await?;
             insert_applied(conn, &script.name).await?;
         }
         Ok(())

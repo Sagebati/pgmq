@@ -72,6 +72,15 @@ pub use visibility_timeout_offest::VisibilityTimeoutOffset;
 
 /// Queue API for the `pgmq` Postgres extension. Implemented natively by each driver adapter.
 /// Bring this trait into scope to call queue methods directly on your pool or transaction.
+///
+/// # Dynamic dispatch
+///
+/// This trait is **not** object-safe (`&dyn Queue` / `Box<dyn Queue>` do not compile). Several
+/// methods take generic parameters — `impl Into<VisibilityTimeoutOffset>`, and `T: Deserialize`
+/// in the read methods — which prevents `dyn` dispatch. For driver-agnostic helpers, use a
+/// generic bound instead: `fn process<Q: Queue>(q: Q) { ... }`. If you need to mix drivers
+/// behind a single non-generic interface, write a thin wrapper that calls a fixed concrete
+/// driver and trait-object on that wrapper.
 #[async_trait]
 pub trait Queue {
     /// Create a queue. Idempotent.
@@ -237,7 +246,8 @@ pub trait Queue {
                 poll_interval,
             )
             .await?
-            .and_then(|rows| rows.into_iter().next()))
+            .into_iter()
+            .next())
     }
 
     async fn read_batch_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
@@ -247,7 +257,7 @@ pub trait Queue {
         max_batch_size: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
-    ) -> Result<Option<Vec<Message<T>>>, PgmqError>;
+    ) -> Result<Vec<Message<T>>, PgmqError>;
 
     async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
@@ -413,6 +423,7 @@ impl PGMQueueExt {
             .map_err(|e| PgmqError::UrlParseError(e.to_string()))?;
         let pool = PgPoolOptions::new()
             .max_connections(max_connections)
+            .acquire_timeout(std::time::Duration::from_secs(10))
             .connect_with(opts)
             .await?;
         Ok(Self {
@@ -485,18 +496,28 @@ impl PGMQueueExt {
         Ok(txn)
     }
 
-    /// Create a queue. Returns `Ok(true)` (the underlying SQL is idempotent — the old return
-    /// value was nominal).
+    /// Create a queue. Returns `Ok(true)` when the queue is newly created, `Ok(false)` when it
+    /// already existed in `pgmq.meta`.
     #[deprecated = "use the `pgmq::Queue` trait on your sqlx pool/connection/transaction directly"]
     pub async fn create(&self, queue_name: &str) -> Result<bool, PgmqError> {
+        let already_existed: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pgmq.meta WHERE queue_name = $1);")
+                .bind(queue_name)
+                .fetch_one(&self.connection)
+                .await?;
         (&self.connection).create(queue_name).await?;
-        Ok(true)
+        Ok(!already_existed)
     }
 
     #[deprecated = "use the `pgmq::Queue` trait on your sqlx pool/connection/transaction directly"]
     pub async fn create_unlogged(&self, queue_name: &str) -> Result<bool, PgmqError> {
+        let already_existed: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pgmq.meta WHERE queue_name = $1);")
+                .bind(queue_name)
+                .fetch_one(&self.connection)
+                .await?;
         (&self.connection).create_unlogged(queue_name).await?;
-        Ok(true)
+        Ok(!already_existed)
     }
 
     #[deprecated = "use the `pgmq::Queue` trait on your sqlx pool/connection/transaction directly"]
@@ -658,7 +679,7 @@ impl PGMQueueExt {
         max_batch_size: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
-    ) -> Result<Option<Vec<Message<T>>>, PgmqError> {
+    ) -> Result<Vec<Message<T>>, PgmqError> {
         (&self.connection)
             .read_batch_with_poll(
                 queue_name,
@@ -877,20 +898,21 @@ impl PGMQueueExt {
         (&self.connection).list_notify_insert_throttles().await
     }
 
-    #[deprecated = "use `pgmq::pg_ext::sqlx_listener::queue_insert_listener`"]
+    #[deprecated = "use `pgmq::adapters::sqlx::listener::queue_insert_listener`"]
     pub async fn queue_insert_listener(
         &self,
         queue_name: &str,
     ) -> Result<sqlx::postgres::PgListener, PgmqError> {
-        crate::pg_ext::sqlx_listener::queue_insert_listener(&self.connection, queue_name).await
+        crate::adapters::sqlx::listener::queue_insert_listener(&self.connection, queue_name).await
     }
 
-    #[deprecated = "use `pgmq::pg_ext::sqlx_listener::queue_insert_listener_all`"]
+    #[deprecated = "use `pgmq::adapters::sqlx::listener::queue_insert_listener_all`"]
     pub async fn queue_insert_listener_all<'a>(
         &self,
         queue_names: impl IntoIterator<Item = &'a str>,
     ) -> Result<sqlx::postgres::PgListener, PgmqError> {
-        crate::pg_ext::sqlx_listener::queue_insert_listener_all(&self.connection, queue_names).await
+        crate::adapters::sqlx::listener::queue_insert_listener_all(&self.connection, queue_names)
+            .await
     }
 
     #[deprecated = "use the `pgmq::Queue` trait on your sqlx pool/connection/transaction directly"]

@@ -114,13 +114,17 @@ async fn archive_rowcount(qname: &str, connection: &Pool<Postgres>) -> i64 {
         .get::<i64, usize>(0)
 }
 
-async fn install_pgmq(queue: &pgmq::PGMQueueExt) -> bool {
+async fn install_pgmq(queue: &pgmq::PGMQueueExt) {
     #[cfg(feature = "install-sql-embedded")]
-    let result = queue.install_sql_from_embedded().await.map(|_| true);
-    #[cfg(not(feature = "install-sql"))]
-    let result = queue.init().await;
-
-    result.expect("failed to init pgmq")
+    queue
+        .install_sql_from_embedded()
+        .await
+        .expect("failed to install pgmq via embedded");
+    #[cfg(all(feature = "install-sql", not(feature = "install-sql-embedded")))]
+    queue.init().await.expect("failed to init pgmq");
+    // When neither install feature is enabled, the test database must already have pgmq
+    // installed (the Makefile pre-populates it via `sqlx migrate run`).
+    let _ = queue;
 }
 
 #[tokio::test]
@@ -206,8 +210,7 @@ async fn test_ext_send_read_delete_core<T: Into<VisibilityTimeoutOffset> + Send>
             None,
         )
         .await
-        .expect("error reading message")
-        .expect("no message");
+        .expect("error reading message");
 
     let poll_duration = start_poll.elapsed();
 
@@ -468,14 +471,12 @@ async fn test_ext_read_batch_with_poll_empty_queue() {
 
     let vt = 4;
 
-    // read_batch_with_poll should return Ok(Some(<empty vec>)) if no items are available to be read.
-    // Todo: In a future SemVer breaking change, the expected return value would be Ok(<empty vec>)
+    // read_batch_with_poll returns an empty Vec if no items are available within the poll window.
     let msg_read = queue
         .read_batch_with_poll::<MyMessage>(&test_queue, vt, 1, Some(Duration::from_secs(1)), None)
         .await
         .unwrap();
-    assert!(msg_read.is_some());
-    assert!(msg_read.unwrap().is_empty());
+    assert!(msg_read.is_empty());
 }
 
 #[tokio::test]
@@ -770,8 +771,7 @@ async fn test_byop() {
 
     // use the pool to create a new queue
     let queue = pgmq::PGMQueueExt::new_with_pool(pool).await;
-    let init = install_pgmq(&queue).await;
-    assert!(init, "failed to create extension");
+    install_pgmq(&queue).await;
 
     // first time must succeed
     let test_queue = format!("test_byop_{}", rand::thread_rng().gen_range(0..100000));
@@ -804,8 +804,7 @@ async fn test_transactional() {
 
     // create queue using pool_0
     let queue = pgmq::PGMQueueExt::new_with_pool(pool_0.clone()).await;
-    let init = install_pgmq(&queue).await;
-    assert!(init, "failed to create extension");
+    install_pgmq(&queue).await;
 
     use pgmq::Queue;
     // `Queue` is implemented on `&PgPool`, so we can call directly on the pool.
@@ -857,8 +856,7 @@ async fn test_create_queue_concurrent_is_idempotent() {
         .expect("failed to connect to postgres");
 
     let queue = pgmq::PGMQueueExt::new_with_pool(pool).await;
-    let init = install_pgmq(&queue).await;
-    assert!(init, "failed to create extension");
+    install_pgmq(&queue).await;
 
     let mut conn1 = queue.connection.acquire().await.unwrap();
     let mut conn2 = queue.connection.acquire().await.unwrap();

@@ -2,6 +2,7 @@ use crate::install::install_err;
 use crate::install::version::Version;
 use crate::PgmqError;
 use regex::Regex;
+#[cfg(any(feature = "install-sql-embedded", feature = "install-sql-github"))]
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::str::FromStr;
@@ -67,6 +68,9 @@ impl PartialOrd for ParsedScriptName {
     }
 }
 
+/// Async script source. Only the GitHub fetcher actually needs the async + version-aware shape
+/// — the embedded fetcher exposes a `fetch_sync(None)` that the install paths use directly.
+#[cfg(feature = "install-sql-github")]
 pub trait ScriptFetcher {
     async fn fetch(
         &self,
@@ -75,24 +79,29 @@ pub trait ScriptFetcher {
 }
 
 /// Struct to contain metadata for a pgmq extension migration script along with its content.
+/// Only used by the embedded and github install paths.
+#[cfg(any(feature = "install-sql-embedded", feature = "install-sql-github"))]
 #[derive(Debug, Eq)]
 pub struct MigrationScript {
     pub name: ParsedScriptName,
     pub content: Cow<'static, str>,
 }
 
+#[cfg(any(feature = "install-sql-embedded", feature = "install-sql-github"))]
 impl PartialEq for MigrationScript {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
     }
 }
 
+#[cfg(any(feature = "install-sql-embedded", feature = "install-sql-github"))]
 impl Ord for MigrationScript {
     fn cmp(&self, other: &Self) -> Ordering {
         self.name.cmp(&other.name)
     }
 }
 
+#[cfg(any(feature = "install-sql-embedded", feature = "install-sql-github"))]
 impl PartialOrd for MigrationScript {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))

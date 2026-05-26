@@ -233,7 +233,8 @@ mod imp {
         if exists {
             return Ok(false);
         }
-        conn.execute(query::CREATE_PARTITIONED, &[&queue_name]).await?;
+        conn.execute(query::CREATE_PARTITIONED, &[&queue_name])
+            .await?;
         Ok(true)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -366,7 +367,9 @@ mod imp {
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let vt_secs = visibility_timeout.into().as_seconds();
-        let rows = conn.query(query::READ, &[&queue_name, &vt_secs, &qty]).await?;
+        let rows = conn
+            .query(query::READ, &[&queue_name, &vt_secs, &qty])
+            .await?;
         rows.iter()
             .map(Message::<T>::from_tokio_postgres_row)
             .collect()
@@ -527,7 +530,9 @@ mod imp {
         msg_id: i64,
     ) -> Result<bool, PgmqError> {
         check_input(queue_name)?;
-        let row = conn.query_one(query::ARCHIVE, &[&queue_name, &msg_id]).await?;
+        let row = conn
+            .query_one(query::ARCHIVE, &[&queue_name, &msg_id])
+            .await?;
         Ok(row.try_get("archive")?)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -563,7 +568,9 @@ mod imp {
         msg_id: i64,
     ) -> Result<bool, PgmqError> {
         check_input(queue_name)?;
-        let row = conn.query_one(query::DELETE, &[&queue_name, &msg_id]).await?;
+        let row = conn
+            .query_one(query::DELETE, &[&queue_name, &msg_id])
+            .await?;
         Ok(row.try_get("was_deleted")?)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -585,7 +592,8 @@ mod imp {
         queue_name: &str,
     ) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        conn.execute(query::CREATE_FIFO_INDEX, &[&queue_name]).await?;
+        conn.execute(query::CREATE_FIFO_INDEX, &[&queue_name])
+            .await?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -622,7 +630,9 @@ mod imp {
         conn: &C,
         queue_name: &str,
     ) -> Result<Vec<ListTopicBindingsRow>, PgmqError> {
-        let rows = conn.query(query::LIST_TOPIC_BINDINGS, &[&queue_name]).await?;
+        let rows = conn
+            .query(query::LIST_TOPIC_BINDINGS, &[&queue_name])
+            .await?;
         rows.iter()
             .map(ListTopicBindingsRow::from_tokio_postgres_row)
             .collect()
@@ -826,18 +836,16 @@ impl Queue for &tokio_postgres::Client {
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
-    ) -> Result<Option<Vec<Message<T>>>, PgmqError> {
-        Ok(Some(
-            imp::read_batch_with_poll::<_, T>(
-                self,
-                queue_name,
-                visibility_timeout,
-                qty,
-                poll_timeout,
-                poll_interval,
-            )
-            .await?,
-        ))
+    ) -> Result<Vec<Message<T>>, PgmqError> {
+        imp::read_batch_with_poll::<_, T>(
+            self,
+            queue_name,
+            visibility_timeout,
+            qty,
+            poll_timeout,
+            poll_interval,
+        )
+        .await
     }
     async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
@@ -1059,18 +1067,16 @@ impl Queue for &tokio_postgres::Transaction<'_> {
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
-    ) -> Result<Option<Vec<Message<T>>>, PgmqError> {
-        Ok(Some(
-            imp::read_batch_with_poll::<_, T>(
-                self,
-                queue_name,
-                visibility_timeout,
-                qty,
-                poll_timeout,
-                poll_interval,
-            )
-            .await?,
-        ))
+    ) -> Result<Vec<Message<T>>, PgmqError> {
+        imp::read_batch_with_poll::<_, T>(
+            self,
+            queue_name,
+            visibility_timeout,
+            qty,
+            poll_timeout,
+            poll_interval,
+        )
+        .await
     }
     async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,

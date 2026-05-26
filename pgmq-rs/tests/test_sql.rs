@@ -1,4 +1,4 @@
-#![cfg(feature = "sqlx")]
+#![cfg(all(feature = "sqlx", feature = "install-sql-embedded"))]
 
 use pgmq::pg_ext::VisibilityTimeoutOffset;
 use pgmq::Queue;
@@ -22,7 +22,6 @@ impl Default for MyMessage {
     }
 }
 
-#[cfg(feature = "install-sql-embedded")]
 #[tokio::test]
 async fn test_sql_lifecycle() {
     let test_num = rand::thread_rng().gen_range(0..100000);

@@ -9,12 +9,12 @@ use sqlx::{Database, Encode, Type};
 /// converting from [`chrono::Duration`], [`std::time::Duration`], and various integer types
 /// (assumed to be a duration in seconds).
 ///
-/// Note: The offset has 1 second precision and is stored as an [`i32`]. This limits the possible
-/// range of values compared to what's technically supported by Postgres. However, this ensures
-/// that the value provided to Postgres will not overflow, and the maximum [`i32`] value in seconds
-/// is roughly 68 years, which should be plenty large for virtually any use case. If any conversion
-/// to [`i32`] would result in an overflow, the value is instead capped to
-/// [`i32::MIN`]/[`i32::MAX`].
+/// Note: The offset has 1 second precision and is stored as an [`i32`]. Conversions from
+/// [`std::time::Duration`] and [`chrono::Duration`] round sub-second remainders **away from
+/// zero**: 500 ms becomes 1 second, -500 ms becomes -1 second. This preserves the
+/// at-least-as-long contract — a message asked to stay invisible for 500 ms will stay invisible
+/// for at least that long. If any conversion to [`i32`] would result in an overflow, the value is
+/// instead capped to [`i32::MIN`]/[`i32::MAX`].
 ///
 /// # Examples
 ///
@@ -146,13 +146,32 @@ impl From<u64> for VisibilityTimeoutOffset {
 
 impl From<chrono::Duration> for VisibilityTimeoutOffset {
     fn from(value: chrono::Duration) -> Self {
-        value.num_seconds().into()
+        // num_seconds truncates toward zero; nudge away from zero whenever there's a sub-second
+        // remainder so the offset is never shortened below what the caller asked for.
+        let secs = value.num_seconds();
+        let extra_ms = value
+            .num_milliseconds()
+            .saturating_sub(secs.saturating_mul(1000));
+        let bump = if extra_ms > 0 {
+            1
+        } else if extra_ms < 0 {
+            -1
+        } else {
+            0
+        };
+        secs.saturating_add(bump).into()
     }
 }
 
 impl From<std::time::Duration> for VisibilityTimeoutOffset {
     fn from(value: std::time::Duration) -> Self {
-        value.as_secs().into()
+        // as_secs truncates; round up when there's a sub-second remainder so we never shorten.
+        let secs = if value.subsec_nanos() > 0 {
+            value.as_secs().saturating_add(1)
+        } else {
+            value.as_secs()
+        };
+        secs.into()
     }
 }
 

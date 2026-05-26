@@ -53,20 +53,19 @@ pub fn installed_version(conn: &mut PgConnection) -> Result<Option<Version>, Pgm
 #[cfg(feature = "install-sql-embedded")]
 #[doc = include_str!("./embedded/install_sql_embedded.md")]
 pub fn install_sql_from_embedded(conn: &mut PgConnection) -> Result<(), PgmqError> {
-    let installed_version_opt = conn.transaction::<_, PgmqError, _>(|conn| {
-        create_migrations_table(conn)?;
-        let applied = fetch_applied(conn)?;
-        Ok(max_applied_version(&applied).cloned())
-    })?;
-
-    let available = embedded_fetcher().fetch_sync(installed_version_opt.as_ref())?;
+    // Embedded fetcher is in-memory only — fetch all scripts up front, then apply inside a
+    // single transaction that holds the advisory lock across the whole install.
+    let available = embedded_fetcher().fetch_sync(None)?;
 
     conn.transaction::<_, PgmqError, _>(|conn| {
         create_migrations_table(conn)?;
         let applied = fetch_applied(conn)?;
         let to_apply = filter_unapplied_scripts(available, &applied);
         for script in &to_apply {
-            sql_query(script.content.as_ref()).execute(conn)?;
+            // Migration scripts contain many semicolon-separated statements. `sql_query` uses
+            // the extended-query protocol (one prepared statement at a time), so we go through
+            // `batch_execute` which uses the simple-query protocol that splits at semicolons.
+            conn.batch_execute(&script.content)?;
             insert_applied(conn, &script.name)?;
         }
         Ok(())

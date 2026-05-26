@@ -1,6 +1,6 @@
 //! # sqlx adapter
 //!
-//! Single generic [`Queue`][crate::Queue] impl covering everything that satisfies
+//! Single generic [`Queue`] impl covering everything that satisfies
 //! [`sqlx::Acquire<'_, Database = sqlx::Postgres>`](sqlx::Acquire) — so the trait works on
 //! `&sqlx::PgPool`, `&mut sqlx::PgConnection`, and `&mut sqlx::Transaction<'_, Postgres>`
 //! without per-type duplication.
@@ -228,7 +228,7 @@ where
         max_batch_size: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
-    ) -> Result<Option<Vec<Message<T>>>, PgmqError> {
+    ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let sql = query::read_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
         let mut conn = self.acquire().await?;
@@ -242,8 +242,7 @@ where
         if let Some(interval) = poll_interval {
             qb = qb.bind(duration_as_ms_i32(interval));
         }
-        let rows: Vec<Message<T>> = qb.fetch_all(&mut *conn).await?;
-        Ok(Some(rows))
+        Ok(qb.fetch_all(&mut *conn).await?)
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -601,6 +600,7 @@ where
 /// driver-specific listeners as separate sub-modules once their patterns settle). Use these
 /// directly when you're on sqlx.
 pub mod listener {
+    use crate::adapters::helpers::check_input;
     use crate::errors::PgmqError;
     use crate::pg_ext::queue_name_to_insert_notification_channel_name;
     use async_trait::async_trait;
@@ -654,6 +654,7 @@ pub mod listener {
         pool: &PgPool,
         queue_name: &str,
     ) -> Result<sqlx::postgres::PgListener, PgmqError> {
+        check_input(queue_name)?;
         let mut listener = sqlx::postgres::PgListener::connect_with(pool).await?;
         listener
             .listen(&queue_name_to_insert_notification_channel_name(queue_name))
@@ -669,8 +670,11 @@ pub mod listener {
         let mut listener = sqlx::postgres::PgListener::connect_with(pool).await?;
         let channel_names = queue_names
             .into_iter()
-            .map(queue_name_to_insert_notification_channel_name)
-            .collect::<Vec<_>>();
+            .map(|name| {
+                check_input(name)?;
+                Ok::<_, PgmqError>(queue_name_to_insert_notification_channel_name(name))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         listener
             .listen_all(channel_names.iter().map(String::as_str))
             .await?;

@@ -1,5 +1,7 @@
 use crate::install::install_err;
-use crate::install::script::{MigrationScript, ParsedScriptName, ScriptFetcher};
+#[cfg(feature = "install-sql-github")]
+use crate::install::script::ScriptFetcher;
+use crate::install::script::{MigrationScript, ParsedScriptName};
 use crate::install::version::Version;
 use crate::PgmqError;
 use include_dir::{include_dir, Dir};
@@ -18,6 +20,7 @@ static EXTENSION_CONFIG: &str = include_str!("pgmq.control");
 
 pub struct EmbeddedScriptFetcher;
 
+#[cfg(feature = "install-sql-github")]
 impl ScriptFetcher for EmbeddedScriptFetcher {
     async fn fetch(
         &self,

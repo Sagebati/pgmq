@@ -7,13 +7,20 @@
 use crate::errors::PgmqError;
 use serde::Serialize;
 
-/// Convert a `Duration` poll timeout to seconds as `i32`, clamping on overflow.
+/// Convert a `Duration` poll timeout to seconds as `i32`, rounding sub-second remainders UP so
+/// a 500ms timeout becomes 1s instead of 0s (which would short-circuit the server-side poll to
+/// busy-spinning). Clamps to `i32::MAX` on overflow.
 ///
 /// Note: the caller is responsible for deciding whether to pass this to the extension at all —
 /// when the caller does not specify a poll timeout/interval, we omit the parameter from the SQL
 /// entirely so the extension's own defaults apply (rather than hard-coding our own).
 pub fn poll_timeout_secs(dur: std::time::Duration) -> i32 {
-    i32::try_from(dur.as_secs()).unwrap_or(i32::MAX)
+    let secs = if dur.subsec_nanos() > 0 {
+        dur.as_secs().saturating_add(1)
+    } else {
+        dur.as_secs()
+    };
+    i32::try_from(secs).unwrap_or(i32::MAX)
 }
 
 /// Convert a `Duration` to milliseconds as `i32`, clamping on overflow. Used both for poll
@@ -44,10 +51,15 @@ pub fn queue_table_name(queue_name: &str) -> String {
 }
 
 /// Validate a queue or topic name. Returns `Err(PgmqError::InvalidQueueName)` if it fails.
+///
+/// The length cap is 47 = `NAMEDATALEN - 1 - len("archived_at_idx_")`. Postgres truncates
+/// identifiers at `NAMEDATALEN - 1` (63 bytes by default), and pgmq builds the index name
+/// `archived_at_idx_<queue_name>`. A 48-char queue would collide with another 48-char queue
+/// sharing the first 47 chars after truncation.
 pub fn check_input(input: &str) -> Result<(), PgmqError> {
     let valid = input.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
         && !input.is_empty()
-        && input.len() <= 48;
+        && input.len() <= 47;
     if valid {
         Ok(())
     } else {
