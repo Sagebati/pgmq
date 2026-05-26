@@ -25,7 +25,7 @@ use crate::types::{
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use sqlx::{Acquire, Postgres, Row};
+use sqlx::{Acquire, Postgres};
 
 /// Sealed marker trait — restricts the blanket [`Queue`] impl below to the three sqlx
 /// types we want to support, without conflicting with the per-driver impls in
@@ -122,11 +122,10 @@ where
     async fn purge_queue(self, queue_name: &str) -> Result<i64, PgmqError> {
         check_input(queue_name)?;
         let mut conn = self.acquire().await?;
-        let row = sqlx::query(query::PURGE_QUEUE)
+        Ok(sqlx::query_scalar::<_, i64>(query::PURGE_QUEUE)
             .bind(queue_name)
             .fetch_one(&mut *conn)
-            .await?;
-        Ok(row.try_get("purge_queue")?)
+            .await?)
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -355,12 +354,11 @@ where
     async fn archive(self, queue_name: &str, msg_id: i64) -> Result<bool, PgmqError> {
         check_input(queue_name)?;
         let mut conn = self.acquire().await?;
-        let row = sqlx::query(query::ARCHIVE)
+        Ok(sqlx::query_scalar::<_, bool>(query::ARCHIVE)
             .bind(queue_name)
             .bind(msg_id)
             .fetch_one(&mut *conn)
-            .await?;
-        Ok(row.try_get("archive")?)
+            .await?)
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -392,12 +390,11 @@ where
     async fn delete(self, queue_name: &str, msg_id: i64) -> Result<bool, PgmqError> {
         check_input(queue_name)?;
         let mut conn = self.acquire().await?;
-        let row = sqlx::query(query::DELETE)
+        Ok(sqlx::query_scalar::<_, bool>(query::DELETE)
             .bind(queue_name)
             .bind(msg_id)
             .fetch_one(&mut *conn)
-            .await?;
-        Ok(row.try_get("was_deleted")?)
+            .await?)
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
