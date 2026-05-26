@@ -1,4 +1,4 @@
-//! # The queue API — [`PgMQConnExt`]
+//! # The queue API — [`Queue`]
 //!
 //! This module declares the extension trait that adds queue methods to your Postgres
 //! connection. Each driver adapter in [`crate::adapters`] implements every method natively
@@ -7,7 +7,7 @@
 //! Bring the trait into scope and call methods directly on a connection or transaction:
 //!
 //! ```ignore
-//! use pgmq::PgMQConnExt;
+//! use pgmq::Queue;
 //! conn.create("my_queue").await?;
 //! let id = conn.send("my_queue", &payload).await?;
 //! ```
@@ -39,7 +39,7 @@
 //!
 //! ## Composing with transactions
 //!
-//! Every adapter implements `PgMQConnExt` on its driver's transaction type, so enqueue/dequeue
+//! Every adapter implements `Queue` on its driver's transaction type, so enqueue/dequeue
 //! can be atomic with your own SQL. The exact incantation varies per driver — see each
 //! adapter's module documentation for the pattern:
 //!
@@ -54,6 +54,8 @@
 //! - `examples/transactions.rs` for a runnable sqlx-transaction example
 //! - `examples/tokio_postgres_basic.rs` for tokio-postgres
 
+#[cfg(feature = "sqlx")]
+mod deprecated;
 mod visibility_timeout_offest;
 
 use crate::errors::PgmqError;
@@ -62,13 +64,16 @@ use crate::types::{
     SendBatchTopicRow,
 };
 use async_trait::async_trait;
+#[cfg(feature = "sqlx")]
+#[allow(deprecated)]
+pub use deprecated::PGMQueueExt;
 use serde::{Deserialize, Serialize};
 pub use visibility_timeout_offest::VisibilityTimeoutOffset;
 
 /// Queue API for the `pgmq` Postgres extension. Implemented natively by each driver adapter.
 /// Bring this trait into scope to call queue methods directly on your pool or transaction.
 #[async_trait]
-pub trait PgMQConnExt {
+pub trait Queue {
     /// Create a queue. Idempotent.
     async fn create(self, queue_name: &str) -> Result<(), PgmqError>;
 
@@ -284,7 +289,7 @@ pub trait PgMQConnExt {
 // in `crate::adapters::helpers` (private module).
 
 /// Translate the given queue name into the name of the Postgres notification channel that will
-/// be triggered when using [`PgMQConnExt::enable_notify_insert`]. Listen on this channel to
+/// be triggered when using [`Queue::enable_notify_insert`]. Listen on this channel to
 /// receive notifications when an item is inserted into the queue.
 ///
 /// # Examples
@@ -297,35 +302,13 @@ pub fn queue_name_to_insert_notification_channel_name(queue_name: &str) -> Strin
     format!("pgmq.q_{queue_name}.INSERT")
 }
 
-/// sqlx-specific notification listener helpers.
+/// Deprecated alias — the sqlx-specific listener helpers now live in
+/// [`crate::adapters::sqlx::listener`]. Re-exported here for backward compatibility.
 #[cfg(feature = "sqlx")]
+#[deprecated(
+    since = "0.34.0",
+    note = "use `pgmq::adapters::sqlx::listener` (free functions or the `QueueListener` trait)"
+)]
 pub mod sqlx_listener {
-    use super::*;
-    use sqlx::PgPool;
-
-    pub async fn queue_insert_listener(
-        pool: &PgPool,
-        queue_name: &str,
-    ) -> Result<sqlx::postgres::PgListener, PgmqError> {
-        let mut listener = sqlx::postgres::PgListener::connect_with(pool).await?;
-        listener
-            .listen(&queue_name_to_insert_notification_channel_name(queue_name))
-            .await?;
-        Ok(listener)
-    }
-
-    pub async fn queue_insert_listener_all<'a>(
-        pool: &PgPool,
-        queue_names: impl IntoIterator<Item = &'a str>,
-    ) -> Result<sqlx::postgres::PgListener, PgmqError> {
-        let mut listener = sqlx::postgres::PgListener::connect_with(pool).await?;
-        let channel_names = queue_names
-            .into_iter()
-            .map(queue_name_to_insert_notification_channel_name)
-            .collect::<Vec<_>>();
-        listener
-            .listen_all(channel_names.iter().map(|s| s.as_str()))
-            .await?;
-        Ok(listener)
-    }
+    pub use crate::adapters::sqlx::listener::{queue_insert_listener, queue_insert_listener_all};
 }

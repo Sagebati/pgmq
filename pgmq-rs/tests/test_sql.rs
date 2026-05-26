@@ -1,7 +1,7 @@
 #![cfg(feature = "sqlx")]
 
 use pgmq::pg_ext::VisibilityTimeoutOffset;
-use pgmq::PgMQConnExt;
+use pgmq::Queue;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;

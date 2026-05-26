@@ -5,7 +5,7 @@
 The Rust client for [PGMQ](https://github.com/pgmq/pgmq), a lightweight, durable message queue built on top of the
 `pgmq` Postgres extension.
 
-`pgmq` is an **extension trait**: bring [`PgMQConnExt`] into scope and call queue methods directly on your existing
+`pgmq` is an **extension trait**: bring [`Queue`] into scope and call queue methods directly on your existing
 Postgres connection or transaction. There's no constructor and no pool wrapper — you bring your own pool (or no pool
 at all). Works with **sqlx** (default), **tokio-postgres**, **diesel-async**, and **diesel** (sync).
 
@@ -18,7 +18,7 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "postgres"] }
 ```
 
 ```rust
-use pgmq::PgMQConnExt;
+use pgmq::Queue;
 use pgmq::pg_ext::VisibilityTimeoutOffset;
 use serde::{Deserialize, Serialize};
 
@@ -49,7 +49,7 @@ async fn main() -> Result<(), pgmq::PgmqError> {
 
 ## Supported drivers
 
-| Driver | Feature | `PgMQConnExt` implemented on |
+| Driver | Feature | `Queue` implemented on |
 |---|---|---|
 | [sqlx](https://github.com/launchbadge/sqlx) (default) | `sqlx` | `&mut PgConnection`, `&mut Transaction<'_, Postgres>` |
 | [tokio-postgres](https://github.com/sfackler/rust-postgres) | `tokio-postgres` | `&Client`, `&Transaction<'_>` |
@@ -72,11 +72,11 @@ runnable examples: see [`pgmq::adapters::sqlx`](https://docs.rs/pgmq/latest/pgmq
 
 ## Composing with your own transactions
 
-Each adapter also implements `PgMQConnExt` on its driver's transaction type, so enqueue/dequeue can be atomic with
+Each adapter also implements `Queue` on its driver's transaction type, so enqueue/dequeue can be atomic with
 your own business work:
 
 ```rust,no_run
-# use pgmq::PgMQConnExt;
+# use pgmq::Queue;
 # async fn example(pool: sqlx::PgPool) -> Result<(), pgmq::PgmqError> {
 let mut tx = pool.begin().await?;
 sqlx::query("INSERT INTO orders (id) VALUES ($1)").bind(1i64).execute(&mut *tx).await?;

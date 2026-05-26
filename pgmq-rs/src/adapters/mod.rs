@@ -1,6 +1,6 @@
 //! # Driver adapters
 //!
-//! Each driver implements [`crate::PgMQConnExt`] for its connection and transaction types.
+//! Each driver implements [`crate::Queue`] for its connection and transaction types.
 //! Pick the adapter for the driver you're already using:
 //!
 //! | Driver | Module | Cargo feature |
@@ -14,8 +14,22 @@
 //! runnable examples for that driver.
 
 // Private — SQL constants and shared helpers used by the sibling adapters only.
-// Adapters access via `super::query::*` and `super::helpers::*`.
+// Adapters access via `super::query::*` and `super::helpers::*`. Both modules are
+// gated on at least one driver feature being enabled; otherwise their contents are
+// dead code.
+#[cfg(any(
+    feature = "sqlx",
+    feature = "tokio-postgres",
+    feature = "diesel-async",
+    feature = "diesel-sync"
+))]
 mod helpers;
+#[cfg(any(
+    feature = "sqlx",
+    feature = "tokio-postgres",
+    feature = "diesel-async",
+    feature = "diesel-sync"
+))]
 mod query;
 
 #[cfg(feature = "sqlx")]

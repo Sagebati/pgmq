@@ -1,8 +1,11 @@
 //! Per-driver install tests.
 //!
-//! For each enabled adapter feature, verify that `install_sql_from_embedded` succeeds and
-//! that `installed_version` returns a Some(...) afterwards. The install path is idempotent
-//! and uses an advisory lock, so running these in parallel against the same database is safe.
+//! For each enabled adapter feature, verify both install paths succeed:
+//! - `install_sql_from_embedded` — pure-SQL install (bundled with the crate)
+//! - `init` — CREATE EXTENSION pgmq (requires the extension binary on the Postgres server)
+//!
+//! and that `installed_version` returns a `Some(...)` afterwards. The install paths are
+//! idempotent (advisory-locked), so running these in parallel against the same database is safe.
 //!
 //! Run with the matching features enabled, e.g.:
 //! ```
@@ -10,6 +13,9 @@
 //!   cargo test --features sqlx,tokio-postgres,diesel-async,diesel-sync,install-sql-embedded
 //! ```
 //! Each test is `#[cfg]`-gated to its own feature so unused tests are skipped cleanly.
+//!
+//! The `init` tests are gated on the `PGMQ_EXTENSION_INSTALLED` env var being set so they
+//! only run on hosts that actually have the `pgmq` Postgres extension binary available.
 
 #![cfg(feature = "install-sql-embedded")]
 
@@ -20,9 +26,15 @@ fn db_url() -> String {
         .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/postgres".to_owned())
 }
 
+fn extension_available() -> bool {
+    env::var("PGMQ_EXTENSION_INSTALLED").is_ok()
+}
+
+// ---- sqlx ----------------------------------------------------------------------
+
 #[cfg(feature = "sqlx")]
 #[tokio::test]
-async fn install_sqlx() {
+async fn install_sql_embedded_sqlx() {
     let pool = sqlx::PgPool::connect(&db_url()).await.expect("connect");
     pgmq::install::sqlx::install_sql_from_embedded(&pool)
         .await
@@ -36,11 +48,28 @@ async fn install_sqlx() {
     );
 }
 
+#[cfg(feature = "sqlx")]
+#[tokio::test]
+async fn init_create_extension_sqlx() {
+    if !extension_available() {
+        eprintln!("skipping init_create_extension_sqlx: set PGMQ_EXTENSION_INSTALLED=1 to run");
+        return;
+    }
+    let pool = sqlx::PgPool::connect(&db_url()).await.expect("connect");
+    pgmq::install::sqlx::init(&pool)
+        .await
+        .expect("init via sqlx");
+}
+
+// ---- tokio-postgres ------------------------------------------------------------
+
 #[cfg(feature = "tokio-postgres")]
 #[tokio::test]
-async fn install_tokio_postgres() {
+async fn install_sql_embedded_tokio_postgres() {
     use tokio_postgres::NoTls;
-    let (mut client, conn) = tokio_postgres::connect(&db_url(), NoTls).await.expect("connect");
+    let (mut client, conn) = tokio_postgres::connect(&db_url(), NoTls)
+        .await
+        .expect("connect");
     tokio::spawn(async move {
         let _ = conn.await;
     });
@@ -56,15 +85,44 @@ async fn install_tokio_postgres() {
     );
 }
 
-#[cfg(feature = "diesel-async")]
+#[cfg(feature = "tokio-postgres")]
 #[tokio::test]
-async fn install_diesel_async() {
+async fn init_create_extension_tokio_postgres() {
+    if !extension_available() {
+        eprintln!(
+            "skipping init_create_extension_tokio_postgres: set PGMQ_EXTENSION_INSTALLED=1 to run"
+        );
+        return;
+    }
+    use tokio_postgres::NoTls;
+    let (mut client, conn) = tokio_postgres::connect(&db_url(), NoTls)
+        .await
+        .expect("connect");
+    tokio::spawn(async move {
+        let _ = conn.await;
+    });
+    pgmq::install::tokio_postgres::init(&mut client)
+        .await
+        .expect("init via tokio-postgres");
+}
+
+// ---- diesel-async --------------------------------------------------------------
+
+#[cfg(feature = "diesel-async")]
+fn diesel_async_pool(
+) -> diesel_async::pooled_connection::deadpool::Pool<diesel_async::AsyncPgConnection> {
     use diesel_async::pooled_connection::deadpool::Pool;
     use diesel_async::pooled_connection::AsyncDieselConnectionManager;
     use diesel_async::AsyncPgConnection;
 
     let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(db_url());
-    let pool = Pool::builder(manager).build().expect("build pool");
+    Pool::builder(manager).build().expect("build pool")
+}
+
+#[cfg(feature = "diesel-async")]
+#[tokio::test]
+async fn install_sql_embedded_diesel_async() {
+    let pool = diesel_async_pool();
     pgmq::install::diesel_async::install_sql_from_embedded(&pool)
         .await
         .expect("install via diesel-async");
@@ -77,18 +135,50 @@ async fn install_diesel_async() {
     );
 }
 
+#[cfg(feature = "diesel-async")]
+#[tokio::test]
+async fn init_create_extension_diesel_async() {
+    if !extension_available() {
+        eprintln!(
+            "skipping init_create_extension_diesel_async: set PGMQ_EXTENSION_INSTALLED=1 to run"
+        );
+        return;
+    }
+    let pool = diesel_async_pool();
+    pgmq::install::diesel_async::init(&pool)
+        .await
+        .expect("init via diesel-async");
+}
+
+// ---- diesel-sync ---------------------------------------------------------------
+
 #[cfg(feature = "diesel-sync")]
 #[test]
-fn install_diesel_sync() {
+fn install_sql_embedded_diesel_sync() {
     use diesel::pg::PgConnection;
     use diesel::Connection;
     let mut conn = PgConnection::establish(&db_url()).expect("connect");
     pgmq::install::diesel_sync::install_sql_from_embedded(&mut conn)
         .expect("install via diesel-sync");
-    let version =
-        pgmq::install::diesel_sync::installed_version(&mut conn).expect("installed_version via diesel-sync");
+    let version = pgmq::install::diesel_sync::installed_version(&mut conn)
+        .expect("installed_version via diesel-sync");
     assert!(
         version.is_some(),
         "expected an installed pgmq version after install_sql_from_embedded via diesel-sync"
     );
+}
+
+#[cfg(feature = "diesel-sync")]
+#[test]
+fn init_create_extension_diesel_sync() {
+    if !extension_available() {
+        eprintln!(
+            "skipping init_create_extension_diesel_sync: set PGMQ_EXTENSION_INSTALLED=1 to run"
+        );
+        return;
+    }
+    use diesel::pg::PgConnection;
+    use diesel::Connection;
+    let mut conn = PgConnection::establish(&db_url()).expect("connect");
+    pgmq::install::diesel_sync::init(&mut conn).expect("init via diesel-sync");
 }

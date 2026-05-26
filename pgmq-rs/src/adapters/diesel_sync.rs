@@ -1,6 +1,6 @@
 //! # diesel (sync) adapter
 //!
-//! Implements [`crate::PgMQConnExt`] for [`&mut diesel::pg::PgConnection`](diesel::pg::PgConnection).
+//! Implements [`crate::Queue`] for [`&mut diesel::pg::PgConnection`](diesel::pg::PgConnection).
 //!
 //! The trait signature is `async fn`, but diesel's sync `PgConnection` runs everything
 //! synchronously. Method bodies execute diesel I/O on the calling thread; the returned future
@@ -38,7 +38,7 @@
 //! ## Normal use (no async runtime, with `block_on` helper)
 //!
 //! ```ignore
-//! use pgmq::PgMQConnExt;
+//! use pgmq::Queue;
 //! use pgmq::pg_ext::VisibilityTimeoutOffset;
 //! use diesel::Connection;
 //!
@@ -86,7 +86,7 @@
 //! `&mut PgConnection`. Call pgmq methods on it directly inside the closure:
 //!
 //! ```ignore
-//! use pgmq::PgMQConnExt;
+//! use pgmq::Queue;
 //! use diesel::{Connection, RunQueryDsl};
 //!
 //! conn.transaction::<_, pgmq::PgmqError, _>(|conn| {
@@ -119,11 +119,11 @@
 
 use super::helpers::check_input;
 use super::helpers::{
-    poll_interval_to_ms, poll_timeout_to_secs, serialize_list, serialize_optional_list,
+    poll_interval_ms, poll_timeout_secs, serialize_list, serialize_optional_list,
 };
 use super::query;
 use crate::errors::PgmqError;
-use crate::pg_ext::{PgMQConnExt, VisibilityTimeoutOffset};
+use crate::pg_ext::{Queue, VisibilityTimeoutOffset};
 use crate::types::{
     ListNotifyInsertThrottlesRow, ListTopicBindingsRow, Message, PGMQueueMeta, QueueMetrics,
     SendBatchTopicRow,
@@ -197,7 +197,7 @@ impl MessageRowJson {
 }
 
 #[async_trait]
-impl PgMQConnExt for &mut PgConnection {
+impl Queue for &mut PgConnection {
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn create(self, queue_name: &str) -> Result<(), PgmqError> {
         check_input(queue_name)?;
@@ -424,15 +424,19 @@ impl PgMQConnExt for &mut PgConnection {
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Option<Vec<Message<T>>>, PgmqError> {
         check_input(queue_name)?;
-        let pt = poll_timeout_to_secs(poll_timeout);
-        let pi = poll_interval_to_ms(poll_interval);
-        let rows: Vec<MessageRowJson> = sql_query(query::READ_WITH_POLL)
+        let sql = query::read_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
+        let mut q = sql_query(sql)
+            .into_boxed::<Pg>()
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::Integer, _>(vt.into().as_seconds())
-            .bind::<sql_types::Integer, _>(max_batch_size)
-            .bind::<sql_types::Integer, _>(pt)
-            .bind::<sql_types::Integer, _>(pi)
-            .load(self)?;
+            .bind::<sql_types::Integer, _>(max_batch_size);
+        if let Some(t) = poll_timeout {
+            q = q.bind::<sql_types::Integer, _>(poll_timeout_secs(t));
+        }
+        if let Some(i) = poll_interval {
+            q = q.bind::<sql_types::Integer, _>(poll_interval_ms(i));
+        }
+        let rows: Vec<MessageRowJson> = q.load(self)?;
         Ok(Some(
             rows.into_iter()
                 .map(MessageRowJson::into_message)
@@ -464,15 +468,20 @@ impl PgMQConnExt for &mut PgConnection {
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let pt = poll_timeout_to_secs(poll_timeout);
-        let pi = poll_interval_to_ms(poll_interval);
-        let rows: Vec<MessageRowJson> = sql_query(query::READ_GROUPED_WITH_POLL)
+        let sql =
+            query::read_grouped_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
+        let mut q = sql_query(sql)
+            .into_boxed::<Pg>()
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::Integer, _>(vt.into().as_seconds())
-            .bind::<sql_types::Integer, _>(qty)
-            .bind::<sql_types::Integer, _>(pt)
-            .bind::<sql_types::Integer, _>(pi)
-            .load(self)?;
+            .bind::<sql_types::Integer, _>(qty);
+        if let Some(t) = poll_timeout {
+            q = q.bind::<sql_types::Integer, _>(poll_timeout_secs(t));
+        }
+        if let Some(i) = poll_interval {
+            q = q.bind::<sql_types::Integer, _>(poll_interval_ms(i));
+        }
+        let rows: Vec<MessageRowJson> = q.load(self)?;
         rows.into_iter().map(MessageRowJson::into_message).collect()
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -515,15 +524,20 @@ impl PgMQConnExt for &mut PgConnection {
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let pt = poll_timeout_to_secs(poll_timeout);
-        let pi = poll_interval_to_ms(poll_interval);
-        let rows: Vec<MessageRowJson> = sql_query(query::READ_GROUPED_RR_WITH_POLL)
+        let sql =
+            query::read_grouped_rr_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
+        let mut q = sql_query(sql)
+            .into_boxed::<Pg>()
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::Integer, _>(vt.into().as_seconds())
-            .bind::<sql_types::Integer, _>(qty)
-            .bind::<sql_types::Integer, _>(pt)
-            .bind::<sql_types::Integer, _>(pi)
-            .load(self)?;
+            .bind::<sql_types::Integer, _>(qty);
+        if let Some(t) = poll_timeout {
+            q = q.bind::<sql_types::Integer, _>(poll_timeout_secs(t));
+        }
+        if let Some(i) = poll_interval {
+            q = q.bind::<sql_types::Integer, _>(poll_interval_ms(i));
+        }
+        let rows: Vec<MessageRowJson> = q.load(self)?;
         rows.into_iter().map(MessageRowJson::into_message).collect()
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]

@@ -1,8 +1,8 @@
-use pgmq::pg_ext::VisibilityTimeoutOffset;
-use pgmq::{errors::PgmqError, Message, PgMQConnExt};
+use pgmq::{errors::PgmqError, Message, Queue};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::PgPool;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), PgmqError> {
@@ -49,7 +49,9 @@ async fn main() -> Result<(), PgmqError> {
         .await
         .expect("Failed to enqueue message");
 
-    let vt = VisibilityTimeoutOffset::seconds(30);
+    // The `vt` parameter accepts anything that implements `Into<VisibilityTimeoutOffset>` —
+    // including `i32`, `i64`, `Duration`, and `chrono::Duration`. Use whatever's natural for you.
+    let vt = Duration::from_secs(30);
 
     let received_json_message: Message<Value> = conn
         .read(my_queue, vt)

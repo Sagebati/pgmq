@@ -6,7 +6,7 @@
 
 use deadpool_postgres::{Config, ManagerConfig, RecyclingMethod, Runtime};
 use pgmq::pg_ext::VisibilityTimeoutOffset;
-use pgmq::PgMQConnExt;
+use pgmq::Queue;
 use serde::{Deserialize, Serialize};
 use tokio_postgres::NoTls;
 

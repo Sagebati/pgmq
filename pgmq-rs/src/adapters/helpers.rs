@@ -7,21 +7,17 @@
 use crate::errors::PgmqError;
 use serde::Serialize;
 
-/// Default poll timeout for `read_with_poll` family methods, in seconds.
-pub const DEFAULT_POLL_TIMEOUT_S: i32 = 5;
-/// Default poll interval for `read_with_poll` family methods, in milliseconds.
-pub const DEFAULT_POLL_INTERVAL_MS: i32 = 250;
-
-pub fn poll_timeout_to_secs(d: Option<std::time::Duration>) -> i32 {
-    d.map_or(DEFAULT_POLL_TIMEOUT_S, |t| {
-        i32::try_from(t.as_secs()).unwrap_or(i32::MAX)
-    })
+/// Convert a `Duration` poll timeout to seconds as `i32`, clamping on overflow.
+///
+/// Note: the caller is responsible for deciding whether to pass this to the extension at all —
+/// when the caller does not specify a poll timeout/interval, we omit the parameter from the SQL
+/// entirely so the extension's own defaults apply (rather than hard-coding our own).
+pub fn poll_timeout_secs(d: std::time::Duration) -> i32 {
+    i32::try_from(d.as_secs()).unwrap_or(i32::MAX)
 }
 
-pub fn poll_interval_to_ms(d: Option<std::time::Duration>) -> i32 {
-    d.map_or(DEFAULT_POLL_INTERVAL_MS, |i| {
-        i32::try_from(i.as_millis()).unwrap_or(i32::MAX)
-    })
+pub fn poll_interval_ms(d: std::time::Duration) -> i32 {
+    i32::try_from(d.as_millis()).unwrap_or(i32::MAX)
 }
 
 pub fn serialize_list<T: Serialize>(

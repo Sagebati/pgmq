@@ -1,11 +1,32 @@
+//! Full integration suite covering the queue API via the deprecated [`pgmq::PGMQueueExt`]
+//! sqlx shim. The shim delegates to the new [`pgmq::Queue`] trait on its inner pool, so these
+//! tests transitively cover the trait against sqlx.
+//!
+//! TODO(follow-up PR): parametrize this suite across all four drivers (sqlx, tokio-postgres,
+//! diesel-async, diesel-sync) so each adapter's `Queue` impl is exercised directly. The
+//! straightforward path is a macro that takes a `mod` name + `with-queue` callback and
+//! generates a sibling module per driver — but that lift is out of scope for this PR.
+
+#![cfg(feature = "sqlx")]
+#![allow(deprecated)]
+
 use pgmq::pg_ext::VisibilityTimeoutOffset;
 use pgmq::types::{ARCHIVE_PREFIX, PGMQ_SCHEMA, QUEUE_PREFIX};
-use pgmq::util::connect;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres, Row};
 use std::env;
 use std::time::Duration;
+
+/// Inline replacement for the removed `pgmq::util::connect` helper.
+async fn connect(url: &str, max_connections: u32) -> Result<Pool<Postgres>, pgmq::PgmqError> {
+    let pool = PgPoolOptions::new()
+        .max_connections(max_connections)
+        .connect(url)
+        .await?;
+    Ok(pool)
+}
 
 // always test extension sdk in its own database
 // to avoid conflict with client only sdk
@@ -138,7 +159,7 @@ async fn test_ext_create_list_drop() {
     assert!(!post_drop_q_names.contains(&test_queue));
 }
 
-async fn test_ext_send_read_delete_core<T: Into<VisibilityTimeoutOffset>>(
+async fn test_ext_send_read_delete_core<T: Into<VisibilityTimeoutOffset> + Send>(
     offset1: T,
     offset2: T,
     offset3: T,
@@ -279,7 +300,7 @@ async fn test_ext_send_read_delete_vt_offset() {
     .await;
 }
 
-async fn test_ext_send_delay_core(delay: impl Copy + Into<VisibilityTimeoutOffset>) {
+async fn test_ext_send_delay_core(delay: impl Copy + Into<VisibilityTimeoutOffset> + Send) {
     let test_queue = format!(
         "test_ext_send_delay_{}",
         rand::thread_rng().gen_range(0..100000)
@@ -474,7 +495,7 @@ async fn test_ext_read_with_poll_empty_queue() {
     assert!(msg.is_none());
 }
 
-async fn test_ext_send_batch_delay_core(delay: impl Copy + Into<VisibilityTimeoutOffset>) {
+async fn test_ext_send_batch_delay_core(delay: impl Copy + Into<VisibilityTimeoutOffset> + Send) {
     let test_queue = format!(
         "test_ext_send_batch_delay_{}",
         rand::thread_rng().gen_range(0..100000)
@@ -686,15 +707,16 @@ async fn test_create_txn() {
 
     // init a new queue
     let queue = init_queue_ext(&_q).await;
+    use pgmq::Queue;
     // start a txn
     let mut tx = pool.begin().await.expect("failed to start transaction");
     let q = format!(
         "test_create_txn_{}",
         rand::thread_rng().gen_range(0..100000)
     );
-    // use the pool to create a new queue
-    queue
-        .create_with_cxn(&q, &mut *tx)
+    // create a queue inside the transaction via the `Queue` trait directly
+    (&mut tx)
+        .create(&q)
         .await
         .expect("failed to create queue in txn");
     // commit txn
@@ -716,9 +738,9 @@ async fn test_create_txn() {
         "test_create_txn_rb_{}",
         rand::thread_rng().gen_range(0..100000)
     );
-    // use the pool to create a new queue
-    queue
-        .create_with_cxn(&q_rollback, &mut *tx)
+    // create a queue inside the transaction via the `Queue` trait directly
+    (&mut tx)
+        .create(&q_rollback)
         .await
         .expect("failed to create queue in txn");
     // rollback txn
@@ -751,20 +773,19 @@ async fn test_byop() {
     let init = install_pgmq(&queue).await;
     assert!(init, "failed to create extension");
 
-    // first time must return true
+    // first time must succeed
     let test_queue = format!("test_byop_{}", rand::thread_rng().gen_range(0..100000));
-    let created = queue
+    queue
         .create(&test_queue)
         .await
         .expect("failed to create queue");
-    assert!(created, "failed to create queue_{}", test_queue);
 
-    // second time must return false
-    let created = queue
+    // second call must also succeed (the new `Queue` trait is idempotent — the underlying
+    // `pgmq.create()` SQL is a no-op when the queue already exists).
+    queue
         .create(&test_queue)
         .await
-        .expect("failed execute create queue");
-    assert!(!created, "failed to detect duplicate queue");
+        .expect("repeat create should be a no-op (idempotent)");
 }
 
 #[tokio::test]
@@ -786,17 +807,18 @@ async fn test_transactional() {
     let init = install_pgmq(&queue).await;
     assert!(init, "failed to create extension");
 
-    let created = queue
-        .create_with_cxn(&test_queue, &pool_0)
+    use pgmq::Queue;
+    // `Queue` is implemented on `&PgPool`, so we can call directly on the pool.
+    (&pool_0)
+        .create(&test_queue)
         .await
         .expect("failed to create queue");
-    assert!(created);
 
     let mut tx = pool_0.begin().await.expect("failed to start transaction");
 
-    // transaction still open, but message sent
-    let sent_msg = queue
-        .send_with_cxn(&test_queue, &MyMessage::default(), &mut *tx)
+    // transaction still open, but message sent — call `Queue` on `&mut tx`.
+    let sent_msg = (&mut tx)
+        .send(&test_queue, &MyMessage::default())
         .await
         .expect("failed to send message");
     assert_eq!(sent_msg, 1);
@@ -821,8 +843,12 @@ async fn test_transactional() {
     assert_eq!(rows, 1);
 }
 
+/// Two concurrent `create` calls must both succeed — the new `Queue` trait's `create()` is
+/// idempotent at the SQL level (no client-side "already exists" branch), so racing creates is
+/// safe by construction.
 #[tokio::test]
-async fn test_create_queue_race_condition() {
+async fn test_create_queue_concurrent_is_idempotent() {
+    use pgmq::Queue;
     let queue_name = format!("test_tx_{}", rand::thread_rng().gen_range(0..100000));
     let db_url = env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/postgres".to_owned());
@@ -837,15 +863,11 @@ async fn test_create_queue_race_condition() {
     let mut conn1 = queue.connection.acquire().await.unwrap();
     let mut conn2 = queue.connection.acquire().await.unwrap();
 
-    let (result1, result2) = tokio::try_join!(
-        queue.create_with_cxn(&queue_name, &mut conn1),
-        queue.create_with_cxn(&queue_name, &mut conn2)
+    tokio::try_join!(
+        (&mut *conn1).create(&queue_name),
+        (&mut *conn2).create(&queue_name),
     )
-    .unwrap();
-
-    // If there's a race condition in `PGMQueueExt#create`, both results could be `true` (this
-    // may not always occur due to the non-deterministic nature of race conditions).
-    assert_ne!(result1, result2);
+    .expect("both concurrent creates must succeed (idempotent)");
 }
 
 #[tokio::test]
@@ -855,12 +877,10 @@ async fn test_create_fifo_index() {
         rand::thread_rng().gen_range(0..100000)
     );
 
+    use pgmq::Queue;
     let queue = init_queue_ext(&test_queue).await;
     let mut txn = queue.acquire_queue_lock(&test_queue).await.unwrap();
-    queue
-        .create_fifo_index_with_cxn(&test_queue, &mut *txn)
-        .await
-        .unwrap();
+    (&mut txn).create_fifo_index(&test_queue).await.unwrap();
     txn.commit().await.unwrap();
 
     let index_name = format!("q_{test_queue}_fifo_idx");

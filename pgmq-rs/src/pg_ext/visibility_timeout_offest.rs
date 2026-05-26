@@ -5,7 +5,7 @@ use sqlx::{Database, Encode, Type};
 
 /// Type to represent an offset that will be applied to the current timestamp in order to update
 /// the `vt` (visibility timeout) timestamp column of a queue message. Used by various
-/// methods in [`crate::PgMQConnExt`] to set the visibility timeout of a job. Supports
+/// methods in [`crate::Queue`] to set the visibility timeout of a job. Supports
 /// converting from [`chrono::Duration`], [`std::time::Duration`], and various integer types
 /// (assumed to be a duration in seconds).
 ///

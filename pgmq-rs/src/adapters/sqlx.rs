@@ -1,6 +1,6 @@
 //! # sqlx adapter
 //!
-//! Single generic [`PgMQConnExt`][crate::PgMQConnExt] impl covering everything that satisfies
+//! Single generic [`Queue`][crate::Queue] impl covering everything that satisfies
 //! [`sqlx::Acquire<'_, Database = sqlx::Postgres>`](sqlx::Acquire) — so the trait works on
 //! `&sqlx::PgPool`, `&mut sqlx::PgConnection`, and `&mut sqlx::Transaction<'_, Postgres>`
 //! without per-type duplication.
@@ -13,12 +13,11 @@
 //! See the crate-root and per-method documentation for usage patterns.
 
 use super::helpers::{
-    check_input, poll_interval_to_ms, poll_timeout_to_secs, serialize_list,
-    serialize_optional_list,
+    check_input, poll_interval_ms, poll_timeout_secs, serialize_list, serialize_optional_list,
 };
 use super::query;
 use crate::errors::PgmqError;
-use crate::pg_ext::{PgMQConnExt, VisibilityTimeoutOffset};
+use crate::pg_ext::{Queue, VisibilityTimeoutOffset};
 use crate::types::{
     ListNotifyInsertThrottlesRow, ListTopicBindingsRow, Message, PGMQueueMeta, QueueMetrics,
     SendBatchTopicRow,
@@ -27,13 +26,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use sqlx::{Acquire, Postgres, Row};
 
-impl From<sqlx::Error> for PgmqError {
-    fn from(err: sqlx::Error) -> Self {
-        PgmqError::DatabaseError(err.to_string())
-    }
-}
-
-/// Sealed marker trait — restricts the blanket [`PgMQConnExt`] impl below to the three sqlx
+/// Sealed marker trait — restricts the blanket [`Queue`] impl below to the three sqlx
 /// types we want to support, without conflicting with the per-driver impls in
 /// `tokio_postgres` / `diesel_async` / `diesel_sync` adapters.
 mod sealed {
@@ -44,7 +37,7 @@ mod sealed {
 }
 
 #[async_trait]
-impl<'c, A> PgMQConnExt for A
+impl<'c, A> Queue for A
 where
     A: sealed::SqlxConn + Acquire<'c, Database = Postgres> + Send + 'c,
     A::Connection: Send,
@@ -309,17 +302,19 @@ where
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Option<Vec<Message<T>>>, PgmqError> {
         check_input(queue_name)?;
-        let pt = poll_timeout_to_secs(poll_timeout);
-        let pi = poll_interval_to_ms(poll_interval);
+        let sql = query::read_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
         let mut conn = self.acquire().await?;
-        let rows: Vec<Message<T>> = sqlx::query_as::<_, Message<T>>(query::READ_WITH_POLL)
+        let mut q = sqlx::query_as::<_, Message<T>>(&sql)
             .bind(queue_name)
             .bind(vt.into().as_seconds())
-            .bind(max_batch_size)
-            .bind(pt)
-            .bind(pi)
-            .fetch_all(&mut *conn)
-            .await?;
+            .bind(max_batch_size);
+        if let Some(t) = poll_timeout {
+            q = q.bind(poll_timeout_secs(t));
+        }
+        if let Some(i) = poll_interval {
+            q = q.bind(poll_interval_ms(i));
+        }
+        let rows: Vec<Message<T>> = q.fetch_all(&mut *conn).await?;
         Ok(Some(rows))
     }
 
@@ -350,19 +345,20 @@ where
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let pt = poll_timeout_to_secs(poll_timeout);
-        let pi = poll_interval_to_ms(poll_interval);
+        let sql =
+            query::read_grouped_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
         let mut conn = self.acquire().await?;
-        Ok(
-            sqlx::query_as::<_, Message<T>>(query::READ_GROUPED_WITH_POLL)
-                .bind(queue_name)
-                .bind(vt.into().as_seconds())
-                .bind(qty)
-                .bind(pt)
-                .bind(pi)
-                .fetch_all(&mut *conn)
-                .await?,
-        )
+        let mut q = sqlx::query_as::<_, Message<T>>(&sql)
+            .bind(queue_name)
+            .bind(vt.into().as_seconds())
+            .bind(qty);
+        if let Some(t) = poll_timeout {
+            q = q.bind(poll_timeout_secs(t));
+        }
+        if let Some(i) = poll_interval {
+            q = q.bind(poll_interval_ms(i));
+        }
+        Ok(q.fetch_all(&mut *conn).await?)
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -409,19 +405,20 @@ where
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let pt = poll_timeout_to_secs(poll_timeout);
-        let pi = poll_interval_to_ms(poll_interval);
+        let sql =
+            query::read_grouped_rr_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
         let mut conn = self.acquire().await?;
-        Ok(
-            sqlx::query_as::<_, Message<T>>(query::READ_GROUPED_RR_WITH_POLL)
-                .bind(queue_name)
-                .bind(vt.into().as_seconds())
-                .bind(qty)
-                .bind(pt)
-                .bind(pi)
-                .fetch_all(&mut *conn)
-                .await?,
-        )
+        let mut q = sqlx::query_as::<_, Message<T>>(&sql)
+            .bind(queue_name)
+            .bind(vt.into().as_seconds())
+            .bind(qty);
+        if let Some(t) = poll_timeout {
+            q = q.bind(poll_timeout_secs(t));
+        }
+        if let Some(i) = poll_interval {
+            q = q.bind(poll_interval_ms(i));
+        }
+        Ok(q.fetch_all(&mut *conn).await?)
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -437,11 +434,7 @@ where
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn archive_batch(
-        self,
-        queue_name: &str,
-        msg_ids: &[i64],
-    ) -> Result<usize, PgmqError> {
+    async fn archive_batch(self, queue_name: &str, msg_ids: &[i64]) -> Result<usize, PgmqError> {
         check_input(queue_name)?;
         let mut conn = self.acquire().await?;
         let rows = sqlx::query(query::ARCHIVE_BATCH)
@@ -652,11 +645,11 @@ where
         self,
     ) -> Result<Vec<ListNotifyInsertThrottlesRow>, PgmqError> {
         let mut conn = self.acquire().await?;
-        Ok(sqlx::query_as::<_, ListNotifyInsertThrottlesRow>(
-            query::LIST_NOTIFY_INSERT_THROTTLES,
+        Ok(
+            sqlx::query_as::<_, ListNotifyInsertThrottlesRow>(query::LIST_NOTIFY_INSERT_THROTTLES)
+                .fetch_all(&mut *conn)
+                .await?,
         )
-        .fetch_all(&mut *conn)
-        .await?)
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -675,5 +668,89 @@ where
         Ok(sqlx::query_as::<_, QueueMetrics>(query::METRICS_ALL)
             .fetch_all(&mut *conn)
             .await?)
+    }
+}
+
+/// Sqlx-native LISTEN/NOTIFY helpers for queue insert notifications.
+///
+/// Other adapters don't currently expose a listener (tokio-postgres's `AsyncMessage` stream
+/// and diesel-sync's `pg_notifications()` are usable but require non-trivial wiring; we'll add
+/// driver-specific listeners as separate sub-modules once their patterns settle). Use these
+/// directly when you're on sqlx.
+pub mod listener {
+    use crate::errors::PgmqError;
+    use crate::pg_ext::queue_name_to_insert_notification_channel_name;
+    use async_trait::async_trait;
+    use sqlx::PgPool;
+
+    /// Sqlx-specific listener API. Convenience over `sqlx::postgres::PgListener` —
+    /// builds a listener pre-subscribed to one or more pgmq insert-notification channels.
+    #[async_trait]
+    pub trait QueueListener {
+        /// Build a [`sqlx::postgres::PgListener`] subscribed to the insert-notification
+        /// channel for `queue_name`.
+        async fn queue_insert_listener(
+            self,
+            queue_name: &str,
+        ) -> Result<sqlx::postgres::PgListener, PgmqError>;
+
+        /// Build a [`sqlx::postgres::PgListener`] subscribed to insert-notification channels
+        /// for every name in `queue_names`.
+        async fn queue_insert_listener_all<'a, I>(
+            self,
+            queue_names: I,
+        ) -> Result<sqlx::postgres::PgListener, PgmqError>
+        where
+            I: IntoIterator<Item = &'a str> + Send,
+            I::IntoIter: Send;
+    }
+
+    #[async_trait]
+    impl QueueListener for &PgPool {
+        async fn queue_insert_listener(
+            self,
+            queue_name: &str,
+        ) -> Result<sqlx::postgres::PgListener, PgmqError> {
+            queue_insert_listener(self, queue_name).await
+        }
+
+        async fn queue_insert_listener_all<'a, I>(
+            self,
+            queue_names: I,
+        ) -> Result<sqlx::postgres::PgListener, PgmqError>
+        where
+            I: IntoIterator<Item = &'a str> + Send,
+            I::IntoIter: Send,
+        {
+            queue_insert_listener_all(self, queue_names).await
+        }
+    }
+
+    /// Free-function equivalent of [`QueueListener::queue_insert_listener`].
+    pub async fn queue_insert_listener(
+        pool: &PgPool,
+        queue_name: &str,
+    ) -> Result<sqlx::postgres::PgListener, PgmqError> {
+        let mut listener = sqlx::postgres::PgListener::connect_with(pool).await?;
+        listener
+            .listen(&queue_name_to_insert_notification_channel_name(queue_name))
+            .await?;
+        Ok(listener)
+    }
+
+    /// Free-function equivalent of [`QueueListener::queue_insert_listener_all`].
+    pub async fn queue_insert_listener_all<'a>(
+        pool: &PgPool,
+        queue_names: impl IntoIterator<Item = &'a str>,
+    ) -> Result<sqlx::postgres::PgListener, PgmqError> {
+        let mut listener = sqlx::postgres::PgListener::connect_with(pool).await?;
+        let channel_names = queue_names
+            .into_iter()
+            .map(queue_name_to_insert_notification_channel_name)
+            .collect::<Vec<_>>();
+        listener
+            .listen_all(channel_names.iter().map(|s| s.as_str()))
+            .await?;
+        Ok(listener)
     }
 }

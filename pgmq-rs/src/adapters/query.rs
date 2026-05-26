@@ -15,12 +15,9 @@ pub const SEND: &str = include_str!("../sql/send.sql");
 pub const SEND_BATCH: &str = include_str!("../sql/send_batch.sql");
 
 pub const READ: &str = include_str!("../sql/read.sql");
-pub const READ_WITH_POLL: &str = include_str!("../sql/read_with_poll.sql");
 pub const READ_GROUPED: &str = include_str!("../sql/read_grouped.sql");
-pub const READ_GROUPED_WITH_POLL: &str = include_str!("../sql/read_grouped_with_poll.sql");
 pub const READ_GROUPED_HEAD: &str = include_str!("../sql/read_grouped_head.sql");
 pub const READ_GROUPED_RR: &str = include_str!("../sql/read_grouped_rr.sql");
-pub const READ_GROUPED_RR_WITH_POLL: &str = include_str!("../sql/read_grouped_rr_with_poll.sql");
 
 pub const POP: &str = include_str!("../sql/pop.sql");
 
@@ -62,6 +59,63 @@ pub fn convert_archive_partitioned_sql(
     }
     if has_retention_interval {
         sql.push_str(&format!(", retention_interval=>${idx}::text"));
+    }
+    sql.push_str(");");
+    sql
+}
+
+/// SQL for `pgmq.read_with_poll(...)` with `max_poll_seconds` / `poll_interval_ms` optionally
+/// included. Omitting them lets the extension's own defaults apply rather than hard-coding ours.
+///
+/// Positional params: `$1` = queue_name, `$2` = vt, `$3` = qty, then optionally `max_poll_seconds`
+/// and `poll_interval_ms` in that order.
+pub fn read_with_poll_sql(has_poll_timeout: bool, has_poll_interval: bool) -> String {
+    read_poll_sql_template(
+        "pgmq.read_with_poll",
+        true,
+        has_poll_timeout,
+        has_poll_interval,
+    )
+}
+
+pub fn read_grouped_with_poll_sql(has_poll_timeout: bool, has_poll_interval: bool) -> String {
+    read_poll_sql_template(
+        "pgmq.read_grouped_with_poll",
+        true,
+        has_poll_timeout,
+        has_poll_interval,
+    )
+}
+
+pub fn read_grouped_rr_with_poll_sql(has_poll_timeout: bool, has_poll_interval: bool) -> String {
+    read_poll_sql_template(
+        "pgmq.read_grouped_rr_with_poll",
+        true,
+        has_poll_timeout,
+        has_poll_interval,
+    )
+}
+
+fn read_poll_sql_template(
+    fn_name: &str,
+    has_qty: bool,
+    has_poll_timeout: bool,
+    has_poll_interval: bool,
+) -> String {
+    let mut sql = format!(
+        "SELECT msg_id, read_ct, enqueued_at, vt, message from {fn_name}(queue_name=>$1::text, vt=>$2::integer"
+    );
+    let mut idx = 3;
+    if has_qty {
+        sql.push_str(&format!(", qty=>${idx}::integer"));
+        idx += 1;
+    }
+    if has_poll_timeout {
+        sql.push_str(&format!(", max_poll_seconds=>${idx}::integer"));
+        idx += 1;
+    }
+    if has_poll_interval {
+        sql.push_str(&format!(", poll_interval_ms=>${idx}::integer"));
     }
     sql.push_str(");");
     sql

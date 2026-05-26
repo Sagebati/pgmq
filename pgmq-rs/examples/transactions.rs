@@ -7,7 +7,7 @@
 //! Either both happen, or neither does.
 
 use pgmq::pg_ext::VisibilityTimeoutOffset;
-use pgmq::PgMQConnExt;
+use pgmq::Queue;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 
