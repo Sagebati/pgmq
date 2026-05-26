@@ -123,7 +123,7 @@ use super::{
 };
 use crate::adapters::helpers::check_input;
 use crate::adapters::helpers::{
-    duration_as_ms_i32, poll_timeout_secs, queue_table_name, serialize_list, serialize_optional,
+    duration_as_ms_i32, poll_timeout_secs, queue_table_name, serialize_list,
     serialize_optional_list,
 };
 use crate::adapters::query;
@@ -244,7 +244,7 @@ impl Queue for &mut PgConnection {
     ) -> Result<i64, PgmqError> {
         check_input(queue_name)?;
         let message = serde_json::to_value(message)?;
-        let headers = serialize_optional(headers)?;
+        let headers = headers.map(serde_json::to_value).transpose()?;
         let row: SendCol = sql_query(query::SEND)
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::Jsonb, _>(message)
@@ -520,7 +520,7 @@ impl Queue for &mut PgConnection {
         delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<i32, PgmqError> {
         let message = serde_json::to_value(message)?;
-        let headers = serialize_optional(headers)?;
+        let headers = headers.map(serde_json::to_value).transpose()?;
         let row: SendTopicCol = sql_query(query::SEND_TOPIC)
             .bind::<sql_types::Text, _>(routing_key)
             .bind::<sql_types::Jsonb, _>(message)

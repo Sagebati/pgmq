@@ -96,7 +96,7 @@
 
 use super::helpers::check_input;
 use super::helpers::{
-    duration_as_ms_i32, poll_timeout_secs, queue_table_name, serialize_list, serialize_optional,
+    duration_as_ms_i32, poll_timeout_secs, queue_table_name, serialize_list,
     serialize_optional_list,
 };
 use super::query;
@@ -320,7 +320,7 @@ mod imp {
     ) -> Result<i64, PgmqError> {
         check_input(queue_name)?;
         let message = serde_json::to_value(message)?;
-        let headers = serialize_optional(headers)?;
+        let headers = headers.map(serde_json::to_value).transpose()?;
         let delay_secs = delay.into().as_seconds();
         let row = c
             .query_one(query::SEND, &[&queue_name, &message, &headers, &delay_secs])
@@ -649,7 +649,7 @@ mod imp {
         delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<i32, PgmqError> {
         let message = serde_json::to_value(message)?;
-        let headers = serialize_optional(headers)?;
+        let headers = headers.map(serde_json::to_value).transpose()?;
         let delay_secs = delay.into().as_seconds();
         let row = c
             .query_one(

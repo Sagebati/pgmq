@@ -14,7 +14,7 @@
 
 use super::helpers::{
     check_input, duration_as_ms_i32, poll_timeout_secs, queue_table_name, serialize_list,
-    serialize_optional, serialize_optional_list,
+    serialize_optional_list,
 };
 use super::query;
 use crate::errors::PgmqError;
@@ -169,7 +169,7 @@ where
     ) -> Result<i64, PgmqError> {
         check_input(queue_name)?;
         let message = serde_json::to_value(message)?;
-        let headers = serialize_optional(headers)?;
+        let headers = headers.map(serde_json::to_value).transpose()?;
         let mut conn = self.acquire().await?;
         Ok(sqlx::query_scalar::<_, i64>(query::SEND)
             .bind(queue_name)
@@ -486,7 +486,7 @@ where
         delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<i32, PgmqError> {
         let message = serde_json::to_value(message)?;
-        let headers = serialize_optional(headers)?;
+        let headers = headers.map(serde_json::to_value).transpose()?;
         let mut conn = self.acquire().await?;
         Ok(sqlx::query_scalar::<_, i32>(query::SEND_TOPIC)
             .bind(routing_key)

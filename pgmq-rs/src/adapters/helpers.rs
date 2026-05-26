@@ -38,15 +38,6 @@ pub fn serialize_optional_list<H: Serialize>(
     }
 }
 
-/// Serialize an optional value into `Option<serde_json::Value>`. Mirror of
-/// [`serialize_optional_list`] for the single-value (non-slice) case — used by adapters when
-/// turning `Option<&H>` headers into the `jsonb` bind for `send` / `send_topic`.
-pub fn serialize_optional<H: Serialize>(
-    value: Option<&H>,
-) -> Result<Option<serde_json::Value>, serde_json::Error> {
-    value.map(serde_json::to_value).transpose()
-}
-
 /// Build the schema-qualified Postgres table name for a pgmq queue. The pgmq extension stores
 /// each queue's messages in `pgmq.q_<queue_name>` by convention; this helper is the single
 /// source of truth for that mapping (used by every adapter's `create_partitioned` to check
