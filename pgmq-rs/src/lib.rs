@@ -72,8 +72,8 @@
 //! }
 //! ```
 //!
-//! For the other drivers, see [`adapters::tokio_postgres`], [`adapters::diesel_async`], and
-//! [`adapters::diesel_sync`]. Each has an exhaustive module doc covering setup, pool usage,
+//! For the other drivers, see [`adapters::tokio_postgres`], [`adapters::diesel`] (async), and
+//! [`adapters::diesel::sync`]. Each has an exhaustive module doc covering setup, pool usage,
 //! transactions, and install.
 //!
 //! ## Common patterns

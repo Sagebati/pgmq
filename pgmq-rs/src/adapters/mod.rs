@@ -7,8 +7,8 @@
 //! |--------|--------|----------------|
 //! | [sqlx](https://github.com/launchbadge/sqlx) | [`sqlx`] | `sqlx` (default) |
 //! | [tokio-postgres](https://github.com/sfackler/rust-postgres) | [`tokio_postgres`] | `tokio-postgres` |
-//! | [diesel-async](https://github.com/weiznich/diesel_async) | [`diesel_async`] | `diesel-async` |
-//! | [diesel](https://github.com/diesel-rs/diesel) (sync) | [`diesel_sync`] | `diesel-sync` |
+//! | [diesel-async](https://github.com/weiznich/diesel_async) | [`diesel`] | `diesel-async` |
+//! | [diesel](https://github.com/diesel-rs/diesel) (sync) | [`diesel::sync`] | `diesel-sync` |
 //!
 //! Each module's documentation covers setup, pool usage, transactions, and install with
 //! runnable examples for that driver.
@@ -38,8 +38,5 @@ pub mod sqlx;
 #[cfg(feature = "tokio-postgres")]
 pub mod tokio_postgres;
 
-#[cfg(feature = "diesel-async")]
-pub mod diesel_async;
-
-#[cfg(feature = "diesel-sync")]
-pub mod diesel_sync;
+#[cfg(any(feature = "diesel-async", feature = "diesel-sync"))]
+pub mod diesel;

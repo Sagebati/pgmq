@@ -112,16 +112,20 @@
 //! }).await??;
 //! ```
 //!
-//! For most use cases where you're already in async land, prefer the [`diesel-async`][async]
-//! adapter directly.
+//! For most use cases where you're already in async land, prefer the [diesel-async][async]
+//! adapter (the top-level [`crate::adapters::diesel`] module).
 //!
-//! [async]: crate::adapters::diesel_async
+//! [async]: crate::adapters::diesel
 
-use super::helpers::check_input;
-use super::helpers::{
+use super::{
+    ArchiveCol, DeleteCol, ExistsCol, MessageRowJson, PurgeQueueCol, SendBatchCol, SendCol,
+    SendTopicCol,
+};
+use crate::adapters::helpers::check_input;
+use crate::adapters::helpers::{
     poll_interval_ms, poll_timeout_secs, serialize_list, serialize_optional_list,
 };
-use super::query;
+use crate::adapters::query;
 use crate::errors::PgmqError;
 use crate::pg_ext::{Queue, VisibilityTimeoutOffset};
 use crate::types::{
@@ -130,71 +134,8 @@ use crate::types::{
 };
 use async_trait::async_trait;
 use diesel::pg::{Pg, PgConnection};
-use diesel::{sql_query, sql_types, OptionalExtension, QueryableByName, RunQueryDsl};
+use diesel::{sql_query, sql_types, OptionalExtension, RunQueryDsl};
 use serde::{Deserialize, Serialize};
-
-// Scalar single-column return structs.
-#[derive(QueryableByName)]
-struct SendCol {
-    #[diesel(sql_type = sql_types::BigInt)]
-    send: i64,
-}
-#[derive(QueryableByName)]
-struct SendBatchCol {
-    #[diesel(sql_type = sql_types::BigInt)]
-    send_batch: i64,
-}
-#[derive(QueryableByName)]
-struct SendTopicCol {
-    #[diesel(sql_type = sql_types::Integer)]
-    send_topic: i32,
-}
-#[derive(QueryableByName)]
-struct ArchiveCol {
-    #[diesel(sql_type = sql_types::Bool)]
-    archive: bool,
-}
-#[derive(QueryableByName)]
-struct DeleteCol {
-    #[diesel(sql_type = sql_types::Bool)]
-    was_deleted: bool,
-}
-#[derive(QueryableByName)]
-struct PurgeQueueCol {
-    #[diesel(sql_type = sql_types::BigInt)]
-    purge_queue: i64,
-}
-#[derive(QueryableByName)]
-struct ExistsCol {
-    #[diesel(sql_type = sql_types::Bool)]
-    exists: bool,
-}
-
-#[derive(QueryableByName)]
-struct MessageRowJson {
-    #[diesel(sql_type = sql_types::BigInt)]
-    msg_id: i64,
-    #[diesel(sql_type = sql_types::Integer)]
-    read_ct: i32,
-    #[diesel(sql_type = sql_types::Timestamptz)]
-    enqueued_at: chrono::DateTime<chrono::Utc>,
-    #[diesel(sql_type = sql_types::Timestamptz)]
-    vt: chrono::DateTime<chrono::Utc>,
-    #[diesel(sql_type = sql_types::Jsonb)]
-    message: serde_json::Value,
-}
-
-impl MessageRowJson {
-    fn into_message<T: for<'de> Deserialize<'de>>(self) -> Result<Message<T>, PgmqError> {
-        Ok(Message {
-            msg_id: self.msg_id,
-            read_ct: self.read_ct,
-            enqueued_at: self.enqueued_at,
-            vt: self.vt,
-            message: serde_json::from_value(self.message)?,
-        })
-    }
-}
 
 #[async_trait]
 impl Queue for &mut PgConnection {
