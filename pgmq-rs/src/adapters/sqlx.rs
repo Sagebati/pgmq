@@ -1,681 +1,462 @@
 //! # sqlx adapter
 //!
-//! Single generic [`Queue`][crate::Queue] impl covering everything that satisfies
-//! [`sqlx::Acquire<'_, Database = sqlx::Postgres>`](sqlx::Acquire) — so the trait works on
-//! `&sqlx::PgPool`, `&mut sqlx::PgConnection`, and `&mut sqlx::Transaction<'_, Postgres>`
-//! without per-type duplication.
+//! Implements [`QueueConn`](super::queue_conn::QueueConn) for sqlx connection types —
+//! `&sqlx::PgPool`, `&mut sqlx::PgConnection`, and `&mut sqlx::Transaction<'_, Postgres>`.
+//! The full [`Queue`](crate::Queue) surface comes from the single blanket
+//! `impl<C: QueueConn> Queue for C` in [`super::queue_conn`], so no Queue-method bodies live
+//! in this file — only the per-driver primitives.
 //!
-//! Each method body acquires a connection via `self.acquire()` and runs a single query (or two
-//! for the few methods that need them). For `&PgPool` this acquires from the pool (same cost
-//! as sqlx's own pool-level `execute`); for `&mut PgConnection` / `&mut Transaction` the
-//! acquire is a no-op.
+//! Three impls instead of a blanket because [`sqlx::Acquire::acquire`] consumes `self`, while
+//! `QueueConn` takes `&mut self`. Each impl reborrows its receiver into the right form for
+//! sqlx's [`Executor`] API and delegates to private helpers that take `&mut PgConnection`.
 //!
-//! See the crate-root and per-method documentation for usage patterns.
+//! Bonus: a sqlx-native [LISTEN/NOTIFY helper](listener) for `pgmq` insert channels, used by
+//! the higher-level listener API in [`crate::pg_ext`].
 
-use super::helpers::{
-    check_input, poll_interval_ms, poll_timeout_secs, serialize_list, serialize_optional_list,
-};
-use super::query;
+use super::queue_conn::{Param, Params, QueueConn};
 use crate::errors::PgmqError;
-use crate::pg_ext::{Queue, VisibilityTimeoutOffset};
 use crate::types::{
     ListNotifyInsertThrottlesRow, ListTopicBindingsRow, Message, PGMQueueMeta, QueueMetrics,
     SendBatchTopicRow,
 };
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use sqlx::{Acquire, Postgres, Row};
+use serde::Deserialize;
+use sqlx::{Executor, Postgres, Row};
 
-/// Sealed marker trait — restricts the blanket [`Queue`] impl below to the three sqlx
-/// types we want to support, without conflicting with the per-driver impls in
-/// `tokio_postgres` / `diesel_async` / `diesel_sync` adapters.
-mod sealed {
-    pub trait SqlxConn {}
-    impl SqlxConn for &sqlx::PgPool {}
-    impl SqlxConn for &mut sqlx::PgConnection {}
-    impl SqlxConn for &mut sqlx::Transaction<'_, sqlx::Postgres> {}
+// ---------------------------------------------------------------------------------------------
+// Bind helpers — turn a `Params` into a chain of sqlx `.bind(...)` calls. sqlx infers the
+// Postgres type from each value's `Encode<Postgres>` impl (`&str` → `text`, `i64` → `bigint`,
+// `serde_json::Value` → `jsonb`, etc.). Two variants because sqlx's typed-row decoder
+// (`query_as`) returns a different Query type than the untyped one.
+// ---------------------------------------------------------------------------------------------
+
+fn bind_sqlx<'q>(
+    mut q: sqlx::query::Query<'q, Postgres, sqlx::postgres::PgArguments>,
+    params: Params<'q>,
+) -> sqlx::query::Query<'q, Postgres, sqlx::postgres::PgArguments> {
+    for p in params.0 {
+        q = match p {
+            Param::Text(s) => q.bind(s),
+            Param::BigInt(n) => q.bind(n),
+            Param::Integer(n) => q.bind(n),
+            Param::Jsonb(v) => q.bind(v),
+            Param::NullableJsonb(v) => q.bind(v),
+            Param::BigIntArray(a) => q.bind(a),
+            Param::JsonbArray(a) => q.bind(a),
+            Param::NullableJsonbArray(a) => q.bind(a),
+        };
+    }
+    q
 }
 
-#[async_trait]
-impl<'c, A> Queue for A
-where
-    A: sealed::SqlxConn + Acquire<'c, Database = Postgres> + Send + 'c,
-    A::Connection: Send,
-{
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn create(self, queue_name: &str) -> Result<(), PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        sqlx::query(query::CREATE)
-            .bind(queue_name)
-            .execute(&mut *conn)
-            .await?;
-        Ok(())
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn create_unlogged(self, queue_name: &str) -> Result<(), PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        sqlx::query(query::CREATE_UNLOGGED)
-            .bind(queue_name)
-            .execute(&mut *conn)
-            .await?;
-        Ok(())
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn create_partitioned(self, queue_name: &str) -> Result<bool, PgmqError> {
-        check_input(queue_name)?;
-        let queue_table = format!("pgmq.q_{queue_name}");
-        let mut conn = self.acquire().await?;
-        let exists: bool = sqlx::query_scalar::<_, bool>(query::CREATE_PARTITIONED_EXISTS_CHECK)
-            .bind(&queue_table)
-            .fetch_one(&mut *conn)
-            .await?;
-        if exists {
-            return Ok(false);
-        }
-        sqlx::query(query::CREATE_PARTITIONED)
-            .bind(queue_name)
-            .execute(&mut *conn)
-            .await?;
-        Ok(true)
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn convert_archive_partitioned(
-        self,
-        table_name: &str,
-        partition_interval: Option<&str>,
-        retention_interval: Option<&str>,
-    ) -> Result<(), PgmqError> {
-        let sql = query::convert_archive_partitioned_sql(
-            partition_interval.is_some(),
-            retention_interval.is_some(),
-        );
-        let mut conn = self.acquire().await?;
-        let mut q = sqlx::query(&sql).bind(table_name);
-        if let Some(p) = partition_interval {
-            q = q.bind(p);
-        }
-        if let Some(r) = retention_interval {
-            q = q.bind(r);
-        }
-        q.execute(&mut *conn).await?;
-        Ok(())
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn drop_queue(self, queue_name: &str) -> Result<(), PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        sqlx::query(query::DROP_QUEUE)
-            .bind(queue_name)
-            .execute(&mut *conn)
-            .await?;
-        Ok(())
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn purge_queue(self, queue_name: &str) -> Result<i64, PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        let row = sqlx::query(query::PURGE_QUEUE)
-            .bind(queue_name)
-            .fetch_one(&mut *conn)
-            .await?;
-        Ok(row.try_get("purge_queue")?)
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn list_queues(self) -> Result<Option<Vec<PGMQueueMeta>>, PgmqError> {
-        let mut conn = self.acquire().await?;
-        let rows: Vec<PGMQueueMeta> = sqlx::query_as::<_, PGMQueueMeta>(query::LIST_QUEUES)
-            .fetch_all(&mut *conn)
-            .await?;
-        if rows.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(rows))
-        }
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn set_vt<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
-        self,
-        queue_name: &str,
-        msg_id: i64,
-        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<Message<T>, PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        Ok(sqlx::query_as::<_, Message<T>>(query::SET_VT)
-            .bind(queue_name)
-            .bind(msg_id)
-            .bind(visibility_timeout.into().as_seconds())
-            .fetch_one(&mut *conn)
-            .await?)
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn send<T: Serialize + Send + Sync>(
-        self,
-        queue_name: &str,
-        message: &T,
-    ) -> Result<i64, PgmqError> {
-        self.send_delay(queue_name, message, VisibilityTimeoutOffset::seconds(0))
-            .await
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn send_delay<T: Serialize + Send + Sync>(
-        self,
-        queue_name: &str,
-        message: &T,
-        delay: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<i64, PgmqError> {
-        self.send_delay_with_headers(queue_name, message, Option::<&()>::None, delay)
-            .await
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn send_delay_with_headers<T: Serialize + Send + Sync, H: Serialize + Send + Sync>(
-        self,
-        queue_name: &str,
-        message: &T,
-        headers: Option<&H>,
-        delay: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<i64, PgmqError> {
-        check_input(queue_name)?;
-        let message = serde_json::to_value(message)?;
-        let headers = match headers {
-            Some(h) => Some(serde_json::to_value(h)?),
-            None => None,
+fn bind_sqlx_as<'q, O>(
+    mut q: sqlx::query::QueryAs<'q, Postgres, O, sqlx::postgres::PgArguments>,
+    params: Params<'q>,
+) -> sqlx::query::QueryAs<'q, Postgres, O, sqlx::postgres::PgArguments> {
+    for p in params.0 {
+        q = match p {
+            Param::Text(s) => q.bind(s),
+            Param::BigInt(n) => q.bind(n),
+            Param::Integer(n) => q.bind(n),
+            Param::Jsonb(v) => q.bind(v),
+            Param::NullableJsonb(v) => q.bind(v),
+            Param::BigIntArray(a) => q.bind(a),
+            Param::JsonbArray(a) => q.bind(a),
+            Param::NullableJsonbArray(a) => q.bind(a),
         };
-        let mut conn = self.acquire().await?;
-        Ok(sqlx::query_scalar::<_, i64>(query::SEND)
-            .bind(queue_name)
-            .bind(message)
-            .bind(headers)
-            .bind(delay.into().as_seconds())
-            .fetch_one(&mut *conn)
-            .await?)
     }
+    q
+}
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn send_batch<T: Serialize + Send + Sync>(
-        self,
-        queue_name: &str,
-        messages: &[T],
-    ) -> Result<Vec<i64>, PgmqError> {
-        self.send_batch_with_delay(queue_name, messages, VisibilityTimeoutOffset::seconds(0))
-            .await
-    }
+// ---------------------------------------------------------------------------------------------
+// Shared bodies — each primitive's actual logic, parameterized on any `Executor`. Both impls
+// below acquire/reborrow into an `Executor` then call the helper. Keeps the per-receiver impl
+// blocks down to one-line delegations.
+// ---------------------------------------------------------------------------------------------
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn send_batch_with_delay<T: Serialize + Send + Sync>(
-        self,
-        queue_name: &str,
-        messages: &[T],
-        delay: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<Vec<i64>, PgmqError> {
-        self.send_batch_with_delay_with_headers(queue_name, messages, Option::<&[()]>::None, delay)
-            .await
-    }
+mod imp {
+    use super::*;
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn send_batch_with_delay_with_headers<
-        T: Serialize + Send + Sync,
-        H: Serialize + Send + Sync,
-    >(
-        self,
-        queue_name: &str,
-        messages: &[T],
-        headers: Option<&[H]>,
-        delay: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<Vec<i64>, PgmqError> {
-        check_input(queue_name)?;
-        let messages = serialize_list(messages)?;
-        let headers = serialize_optional_list(headers)?;
-        let mut conn = self.acquire().await?;
-        Ok(sqlx::query_scalar::<_, i64>(query::SEND_BATCH)
-            .bind(queue_name)
-            .bind(messages)
-            .bind(headers)
-            .bind(delay.into().as_seconds())
-            .fetch_all(&mut *conn)
-            .await?)
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn read<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
-        self,
-        queue_name: &str,
-        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<Option<Message<T>>, PgmqError> {
-        Ok(self
-            .read_batch::<T>(queue_name, visibility_timeout, 1)
+    pub(super) async fn execute<'e, E>(
+        exec: E,
+        sql: &str,
+        params: Params<'_>,
+    ) -> Result<u64, PgmqError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        let n = bind_sqlx(sqlx::query(sql), params)
+            .execute(exec)
             .await?
-            .into_iter()
-            .next())
+            .rows_affected();
+        Ok(n)
     }
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
-        self,
-        queue_name: &str,
-        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
-        qty: i32,
-    ) -> Result<Vec<Message<T>>, PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        Ok(sqlx::query_as::<_, Message<T>>(query::READ)
-            .bind(queue_name)
-            .bind(visibility_timeout.into().as_seconds())
-            .bind(qty)
-            .fetch_all(&mut *conn)
-            .await?)
+    pub(super) async fn fetch_one_i64<'e, E>(
+        exec: E,
+        sql: &str,
+        params: Params<'_>,
+        col: &str,
+    ) -> Result<i64, PgmqError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        let row = bind_sqlx(sqlx::query(sql), params).fetch_one(exec).await?;
+        Ok(row.try_get(col)?)
     }
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn read_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
-        self,
-        queue_name: &str,
-        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
-        poll_timeout: Option<std::time::Duration>,
-        poll_interval: Option<std::time::Duration>,
-    ) -> Result<Option<Message<T>>, PgmqError> {
-        Ok(self
-            .read_batch_with_poll::<T>(
-                queue_name,
-                visibility_timeout,
-                1,
-                poll_timeout,
-                poll_interval,
-            )
-            .await?
-            .and_then(|v| v.into_iter().next()))
+    pub(super) async fn fetch_one_i32<'e, E>(
+        exec: E,
+        sql: &str,
+        params: Params<'_>,
+        col: &str,
+    ) -> Result<i32, PgmqError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        let row = bind_sqlx(sqlx::query(sql), params).fetch_one(exec).await?;
+        Ok(row.try_get(col)?)
     }
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn read_batch_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
-        self,
-        queue_name: &str,
-        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
-        max_batch_size: i32,
-        poll_timeout: Option<std::time::Duration>,
-        poll_interval: Option<std::time::Duration>,
-    ) -> Result<Option<Vec<Message<T>>>, PgmqError> {
-        check_input(queue_name)?;
-        let sql = query::read_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
-        let mut conn = self.acquire().await?;
-        let mut q = sqlx::query_as::<_, Message<T>>(&sql)
-            .bind(queue_name)
-            .bind(visibility_timeout.into().as_seconds())
-            .bind(max_batch_size);
-        if let Some(t) = poll_timeout {
-            q = q.bind(poll_timeout_secs(t));
-        }
-        if let Some(i) = poll_interval {
-            q = q.bind(poll_interval_ms(i));
-        }
-        let rows: Vec<Message<T>> = q.fetch_all(&mut *conn).await?;
-        Ok(Some(rows))
+    pub(super) async fn fetch_one_bool<'e, E>(
+        exec: E,
+        sql: &str,
+        params: Params<'_>,
+        col: &str,
+    ) -> Result<bool, PgmqError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        let row = bind_sqlx(sqlx::query(sql), params).fetch_one(exec).await?;
+        Ok(row.try_get(col)?)
     }
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
-        self,
-        queue_name: &str,
-        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
-        qty: i32,
-    ) -> Result<Vec<Message<T>>, PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        Ok(sqlx::query_as::<_, Message<T>>(query::READ_GROUPED)
-            .bind(queue_name)
-            .bind(visibility_timeout.into().as_seconds())
-            .bind(qty)
-            .fetch_all(&mut *conn)
-            .await?)
+    pub(super) async fn fetch_all_i64<'e, E>(
+        exec: E,
+        sql: &str,
+        params: Params<'_>,
+        col: &str,
+    ) -> Result<Vec<i64>, PgmqError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        let rows = bind_sqlx(sqlx::query(sql), params).fetch_all(exec).await?;
+        rows.iter()
+            .map(|r| r.try_get::<i64, _>(col).map_err(Into::into))
+            .collect()
     }
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn read_grouped_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
-        self,
-        queue_name: &str,
-        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
-        qty: i32,
-        poll_timeout: Option<std::time::Duration>,
-        poll_interval: Option<std::time::Duration>,
-    ) -> Result<Vec<Message<T>>, PgmqError> {
-        check_input(queue_name)?;
-        let sql =
-            query::read_grouped_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
-        let mut conn = self.acquire().await?;
-        let mut q = sqlx::query_as::<_, Message<T>>(&sql)
-            .bind(queue_name)
-            .bind(visibility_timeout.into().as_seconds())
-            .bind(qty);
-        if let Some(t) = poll_timeout {
-            q = q.bind(poll_timeout_secs(t));
-        }
-        if let Some(i) = poll_interval {
-            q = q.bind(poll_interval_ms(i));
-        }
-        Ok(q.fetch_all(&mut *conn).await?)
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn read_grouped_head<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
-        self,
-        queue_name: &str,
-        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
-        qty: i32,
-    ) -> Result<Vec<Message<T>>, PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        Ok(sqlx::query_as::<_, Message<T>>(query::READ_GROUPED_HEAD)
-            .bind(queue_name)
-            .bind(visibility_timeout.into().as_seconds())
-            .bind(qty)
-            .fetch_all(&mut *conn)
-            .await?)
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn read_grouped_rr<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
-        self,
-        queue_name: &str,
-        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
-        qty: i32,
-    ) -> Result<Vec<Message<T>>, PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        Ok(sqlx::query_as::<_, Message<T>>(query::READ_GROUPED_RR)
-            .bind(queue_name)
-            .bind(visibility_timeout.into().as_seconds())
-            .bind(qty)
-            .fetch_all(&mut *conn)
-            .await?)
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn read_grouped_rr_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
-        self,
-        queue_name: &str,
-        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
-        qty: i32,
-        poll_timeout: Option<std::time::Duration>,
-        poll_interval: Option<std::time::Duration>,
-    ) -> Result<Vec<Message<T>>, PgmqError> {
-        check_input(queue_name)?;
-        let sql =
-            query::read_grouped_rr_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
-        let mut conn = self.acquire().await?;
-        let mut q = sqlx::query_as::<_, Message<T>>(&sql)
-            .bind(queue_name)
-            .bind(visibility_timeout.into().as_seconds())
-            .bind(qty);
-        if let Some(t) = poll_timeout {
-            q = q.bind(poll_timeout_secs(t));
-        }
-        if let Some(i) = poll_interval {
-            q = q.bind(poll_interval_ms(i));
-        }
-        Ok(q.fetch_all(&mut *conn).await?)
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn archive(self, queue_name: &str, msg_id: i64) -> Result<bool, PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        let row = sqlx::query(query::ARCHIVE)
-            .bind(queue_name)
-            .bind(msg_id)
-            .fetch_one(&mut *conn)
-            .await?;
-        Ok(row.try_get("archive")?)
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn archive_batch(self, queue_name: &str, msg_ids: &[i64]) -> Result<usize, PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        let rows = sqlx::query(query::ARCHIVE_BATCH)
-            .bind(queue_name)
-            .bind(msg_ids)
-            .fetch_all(&mut *conn)
-            .await?;
+    pub(super) async fn fetch_all_count<'e, E>(
+        exec: E,
+        sql: &str,
+        params: Params<'_>,
+    ) -> Result<usize, PgmqError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        let rows = bind_sqlx(sqlx::query(sql), params).fetch_all(exec).await?;
         Ok(rows.len())
     }
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn pop<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
-        self,
-        queue_name: &str,
-    ) -> Result<Option<Message<T>>, PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        Ok(sqlx::query_as::<_, Message<T>>(query::POP)
-            .bind(queue_name)
-            .fetch_optional(&mut *conn)
+    pub(super) async fn fetch_one_message<'e, E, T>(
+        exec: E,
+        sql: &str,
+        params: Params<'_>,
+    ) -> Result<Message<T>, PgmqError>
+    where
+        E: Executor<'e, Database = Postgres>,
+        T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
+    {
+        Ok(bind_sqlx_as(sqlx::query_as::<_, Message<T>>(sql), params)
+            .fetch_one(exec)
             .await?)
     }
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn delete(self, queue_name: &str, msg_id: i64) -> Result<bool, PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        let row = sqlx::query(query::DELETE)
-            .bind(queue_name)
-            .bind(msg_id)
-            .fetch_one(&mut *conn)
-            .await?;
-        Ok(row.try_get("was_deleted")?)
+    pub(super) async fn fetch_optional_message<'e, E, T>(
+        exec: E,
+        sql: &str,
+        params: Params<'_>,
+    ) -> Result<Option<Message<T>>, PgmqError>
+    where
+        E: Executor<'e, Database = Postgres>,
+        T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
+    {
+        Ok(bind_sqlx_as(sqlx::query_as::<_, Message<T>>(sql), params)
+            .fetch_optional(exec)
+            .await?)
     }
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn delete_batch(self, queue_name: &str, msg_ids: &[i64]) -> Result<usize, PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        let rows = sqlx::query(query::DELETE_BATCH)
-            .bind(queue_name)
-            .bind(msg_ids)
-            .fetch_all(&mut *conn)
-            .await?;
-        Ok(rows.len())
+    pub(super) async fn fetch_all_messages<'e, E, T>(
+        exec: E,
+        sql: &str,
+        params: Params<'_>,
+    ) -> Result<Vec<Message<T>>, PgmqError>
+    where
+        E: Executor<'e, Database = Postgres>,
+        T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
+    {
+        Ok(bind_sqlx_as(sqlx::query_as::<_, Message<T>>(sql), params)
+            .fetch_all(exec)
+            .await?)
     }
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn create_fifo_index(self, queue_name: &str) -> Result<(), PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        sqlx::query(query::CREATE_FIFO_INDEX)
-            .bind(queue_name)
-            .execute(&mut *conn)
-            .await?;
-        Ok(())
+    pub(super) async fn fetch_one_metrics<'e, E>(
+        exec: E,
+        sql: &str,
+        params: Params<'_>,
+    ) -> Result<QueueMetrics, PgmqError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        Ok(bind_sqlx_as(sqlx::query_as::<_, QueueMetrics>(sql), params)
+            .fetch_one(exec)
+            .await?)
     }
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn create_fifo_indexes_all(self) -> Result<(), PgmqError> {
-        let mut conn = self.acquire().await?;
-        sqlx::query(query::CREATE_FIFO_INDEXES_ALL)
-            .execute(&mut *conn)
-            .await?;
-        Ok(())
+    pub(super) async fn fetch_all_metrics<'e, E>(
+        exec: E,
+        sql: &str,
+        params: Params<'_>,
+    ) -> Result<Vec<QueueMetrics>, PgmqError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        Ok(bind_sqlx_as(sqlx::query_as::<_, QueueMetrics>(sql), params)
+            .fetch_all(exec)
+            .await?)
     }
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn bind_topic(self, pattern: &str, queue_name: &str) -> Result<(), PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        sqlx::query(query::BIND_TOPIC)
-            .bind(pattern)
-            .bind(queue_name)
-            .execute(&mut *conn)
-            .await?;
-        Ok(())
+    pub(super) async fn fetch_all_queue_meta<'e, E>(
+        exec: E,
+        sql: &str,
+        params: Params<'_>,
+    ) -> Result<Vec<PGMQueueMeta>, PgmqError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        Ok(bind_sqlx_as(sqlx::query_as::<_, PGMQueueMeta>(sql), params)
+            .fetch_all(exec)
+            .await?)
     }
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn unbind_topic(self, pattern: &str, queue_name: &str) -> Result<(), PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        sqlx::query(query::UNBIND_TOPIC)
-            .bind(pattern)
-            .bind(queue_name)
-            .execute(&mut *conn)
-            .await?;
-        Ok(())
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn list_topic_bindings(
-        self,
-        queue_name: &str,
-    ) -> Result<Vec<ListTopicBindingsRow>, PgmqError> {
-        let mut conn = self.acquire().await?;
+    pub(super) async fn fetch_all_topic_bindings<'e, E>(
+        exec: E,
+        sql: &str,
+        params: Params<'_>,
+    ) -> Result<Vec<ListTopicBindingsRow>, PgmqError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
         Ok(
-            sqlx::query_as::<_, ListTopicBindingsRow>(query::LIST_TOPIC_BINDINGS)
-                .bind(queue_name)
-                .fetch_all(&mut *conn)
+            bind_sqlx_as(sqlx::query_as::<_, ListTopicBindingsRow>(sql), params)
+                .fetch_all(exec)
                 .await?,
         )
     }
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn list_topic_bindings_all(self) -> Result<Vec<ListTopicBindingsRow>, PgmqError> {
-        let mut conn = self.acquire().await?;
+    pub(super) async fn fetch_all_notify_throttles<'e, E>(
+        exec: E,
+        sql: &str,
+        params: Params<'_>,
+    ) -> Result<Vec<ListNotifyInsertThrottlesRow>, PgmqError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        Ok(bind_sqlx_as(
+            sqlx::query_as::<_, ListNotifyInsertThrottlesRow>(sql),
+            params,
+        )
+        .fetch_all(exec)
+        .await?)
+    }
+
+    pub(super) async fn fetch_all_send_batch_topic<'e, E>(
+        exec: E,
+        sql: &str,
+        params: Params<'_>,
+    ) -> Result<Vec<SendBatchTopicRow>, PgmqError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
         Ok(
-            sqlx::query_as::<_, ListTopicBindingsRow>(query::LIST_TOPIC_BINDINGS_ALL)
-                .fetch_all(&mut *conn)
+            bind_sqlx_as(sqlx::query_as::<_, SendBatchTopicRow>(sql), params)
+                .fetch_all(exec)
                 .await?,
         )
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn send_topic<T: Serialize + Send + Sync, H: Serialize + Send + Sync>(
-        self,
-        routing_key: &str,
-        message: &T,
-        headers: Option<&H>,
-        delay: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<i32, PgmqError> {
-        let message = serde_json::to_value(message)?;
-        let headers = match headers {
-            Some(h) => Some(serde_json::to_value(h)?),
-            None => None,
-        };
-        let mut conn = self.acquire().await?;
-        Ok(sqlx::query_scalar::<_, i32>(query::SEND_TOPIC)
-            .bind(routing_key)
-            .bind(message)
-            .bind(headers)
-            .bind(delay.into().as_seconds())
-            .fetch_one(&mut *conn)
-            .await?)
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn send_batch_topic<T: Serialize + Send + Sync, H: Serialize + Send + Sync>(
-        self,
-        routing_key: &str,
-        messages: &[T],
-        headers: Option<&[H]>,
-        delay: impl Into<VisibilityTimeoutOffset> + Send,
-    ) -> Result<Vec<SendBatchTopicRow>, PgmqError> {
-        let messages = serialize_list(messages)?;
-        let headers = serialize_optional_list(headers)?;
-        let mut conn = self.acquire().await?;
-        Ok(
-            sqlx::query_as::<_, SendBatchTopicRow>(query::SEND_BATCH_TOPIC)
-                .bind(routing_key)
-                .bind(messages)
-                .bind(headers)
-                .bind(delay.into().as_seconds())
-                .fetch_all(&mut *conn)
-                .await?,
-        )
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn enable_notify_insert(
-        self,
-        queue_name: &str,
-        throttle_interval: std::time::Duration,
-    ) -> Result<(), PgmqError> {
-        check_input(queue_name)?;
-        let ms = i32::try_from(throttle_interval.as_millis()).unwrap_or(i32::MAX);
-        let mut conn = self.acquire().await?;
-        sqlx::query(query::ENABLE_NOTIFY_INSERT)
-            .bind(queue_name)
-            .bind(ms)
-            .execute(&mut *conn)
-            .await?;
-        Ok(())
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn disable_notify_insert(self, queue_name: &str) -> Result<(), PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        sqlx::query(query::DISABLE_NOTIFY_INSERT)
-            .bind(queue_name)
-            .execute(&mut *conn)
-            .await?;
-        Ok(())
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn update_notify_insert(
-        self,
-        queue_name: &str,
-        throttle_interval: std::time::Duration,
-    ) -> Result<(), PgmqError> {
-        check_input(queue_name)?;
-        let ms = i32::try_from(throttle_interval.as_millis()).unwrap_or(i32::MAX);
-        let mut conn = self.acquire().await?;
-        sqlx::query(query::UPDATE_NOTIFY_INSERT)
-            .bind(queue_name)
-            .bind(ms)
-            .execute(&mut *conn)
-            .await?;
-        Ok(())
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn list_notify_insert_throttles(
-        self,
-    ) -> Result<Vec<ListNotifyInsertThrottlesRow>, PgmqError> {
-        let mut conn = self.acquire().await?;
-        Ok(
-            sqlx::query_as::<_, ListNotifyInsertThrottlesRow>(query::LIST_NOTIFY_INSERT_THROTTLES)
-                .fetch_all(&mut *conn)
-                .await?,
-        )
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn metrics(self, queue_name: &str) -> Result<QueueMetrics, PgmqError> {
-        check_input(queue_name)?;
-        let mut conn = self.acquire().await?;
-        Ok(sqlx::query_as::<_, QueueMetrics>(query::METRICS)
-            .bind(queue_name)
-            .fetch_one(&mut *conn)
-            .await?)
-    }
-
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn metrics_all(self) -> Result<Vec<QueueMetrics>, PgmqError> {
-        let mut conn = self.acquire().await?;
-        Ok(sqlx::query_as::<_, QueueMetrics>(query::METRICS_ALL)
-            .fetch_all(&mut *conn)
-            .await?)
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Per-receiver QueueConn impls. Each acquires/reborrows its receiver into an `Executor` and
+// delegates to the matching `imp::*` helper. The reborrow expression is the only thing that
+// changes between the three impls.
+// ---------------------------------------------------------------------------------------------
+
+// Per-receiver reborrow helpers — free fns with explicit lifetimes so the borrow checker can
+// connect the input and output borrow lifetimes (closures with elided lifetimes can't).
+// Each turns `&mut Self` into the `Executor` form sqlx's `query::execute` expects; auto-deref
+// at the return site takes care of the actual reborrow.
+
+fn reborrow_pool<'a>(s: &'a mut &sqlx::PgPool) -> &'a sqlx::PgPool {
+    s
+}
+
+fn reborrow_conn<'a>(s: &'a mut &mut sqlx::PgConnection) -> &'a mut sqlx::PgConnection {
+    s
+}
+
+fn reborrow_tx<'a>(
+    s: &'a mut &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> &'a mut sqlx::PgConnection {
+    // `Transaction` deref-coerces to `&mut PgConnection` via `DerefMut`; the explicit return
+    // type drives the coercion.
+    s
+}
+
+macro_rules! impl_queue_conn_for_sqlx {
+    ($recv:ty, $exec:expr) => {
+        #[async_trait]
+        impl QueueConn for $recv {
+            #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+            async fn execute(&mut self, sql: &str, params: Params<'_>) -> Result<u64, PgmqError> {
+                imp::execute($exec(self), sql, params).await
+            }
+            #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+            async fn fetch_one_i64(
+                &mut self,
+                sql: &str,
+                params: Params<'_>,
+                col: &str,
+            ) -> Result<i64, PgmqError> {
+                imp::fetch_one_i64($exec(self), sql, params, col).await
+            }
+            #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+            async fn fetch_one_i32(
+                &mut self,
+                sql: &str,
+                params: Params<'_>,
+                col: &str,
+            ) -> Result<i32, PgmqError> {
+                imp::fetch_one_i32($exec(self), sql, params, col).await
+            }
+            #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+            async fn fetch_one_bool(
+                &mut self,
+                sql: &str,
+                params: Params<'_>,
+                col: &str,
+            ) -> Result<bool, PgmqError> {
+                imp::fetch_one_bool($exec(self), sql, params, col).await
+            }
+            #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+            async fn fetch_all_i64(
+                &mut self,
+                sql: &str,
+                params: Params<'_>,
+                col: &str,
+            ) -> Result<Vec<i64>, PgmqError> {
+                imp::fetch_all_i64($exec(self), sql, params, col).await
+            }
+            #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+            async fn fetch_all_count(
+                &mut self,
+                sql: &str,
+                params: Params<'_>,
+            ) -> Result<usize, PgmqError> {
+                imp::fetch_all_count($exec(self), sql, params).await
+            }
+            #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+            async fn fetch_one_message<T>(
+                &mut self,
+                sql: &str,
+                params: Params<'_>,
+            ) -> Result<Message<T>, PgmqError>
+            where
+                T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
+            {
+                imp::fetch_one_message($exec(self), sql, params).await
+            }
+            #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+            async fn fetch_optional_message<T>(
+                &mut self,
+                sql: &str,
+                params: Params<'_>,
+            ) -> Result<Option<Message<T>>, PgmqError>
+            where
+                T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
+            {
+                imp::fetch_optional_message($exec(self), sql, params).await
+            }
+            #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+            async fn fetch_all_messages<T>(
+                &mut self,
+                sql: &str,
+                params: Params<'_>,
+            ) -> Result<Vec<Message<T>>, PgmqError>
+            where
+                T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
+            {
+                imp::fetch_all_messages($exec(self), sql, params).await
+            }
+            #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+            async fn fetch_one_metrics(
+                &mut self,
+                sql: &str,
+                params: Params<'_>,
+            ) -> Result<QueueMetrics, PgmqError> {
+                imp::fetch_one_metrics($exec(self), sql, params).await
+            }
+            #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+            async fn fetch_all_metrics(
+                &mut self,
+                sql: &str,
+                params: Params<'_>,
+            ) -> Result<Vec<QueueMetrics>, PgmqError> {
+                imp::fetch_all_metrics($exec(self), sql, params).await
+            }
+            #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+            async fn fetch_all_queue_meta(
+                &mut self,
+                sql: &str,
+                params: Params<'_>,
+            ) -> Result<Vec<PGMQueueMeta>, PgmqError> {
+                imp::fetch_all_queue_meta($exec(self), sql, params).await
+            }
+            #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+            async fn fetch_all_topic_bindings(
+                &mut self,
+                sql: &str,
+                params: Params<'_>,
+            ) -> Result<Vec<ListTopicBindingsRow>, PgmqError> {
+                imp::fetch_all_topic_bindings($exec(self), sql, params).await
+            }
+            #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+            async fn fetch_all_notify_throttles(
+                &mut self,
+                sql: &str,
+                params: Params<'_>,
+            ) -> Result<Vec<ListNotifyInsertThrottlesRow>, PgmqError> {
+                imp::fetch_all_notify_throttles($exec(self), sql, params).await
+            }
+            #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+            async fn fetch_all_send_batch_topic(
+                &mut self,
+                sql: &str,
+                params: Params<'_>,
+            ) -> Result<Vec<SendBatchTopicRow>, PgmqError> {
+                imp::fetch_all_send_batch_topic($exec(self), sql, params).await
+            }
+        }
+    };
+}
+
+impl_queue_conn_for_sqlx!(&sqlx::PgPool, reborrow_pool);
+impl_queue_conn_for_sqlx!(&mut sqlx::PgConnection, reborrow_conn);
+impl_queue_conn_for_sqlx!(&mut sqlx::Transaction<'_, sqlx::Postgres>, reborrow_tx);
+
+// ---------------------------------------------------------------------------------------------
+// LISTEN/NOTIFY helpers (sqlx-specific surface, unchanged by the QueueConn refactor).
+// ---------------------------------------------------------------------------------------------
 
 /// Sqlx-native LISTEN/NOTIFY helpers for queue insert notifications.
 ///
