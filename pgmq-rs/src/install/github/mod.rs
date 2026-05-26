@@ -25,7 +25,7 @@ impl GitHubScriptFetcher {
     pub async fn new(version: Option<&str>) -> Result<Self, PgmqError> {
         let version = if let Some(version) = version {
             Version::from_str(version)
-                .map(|v| format!("v{v}"))
+                .map(|ver| format!("v{ver}"))
                 .unwrap_or(version.to_string())
         } else {
             get_latest_release_tag().await?

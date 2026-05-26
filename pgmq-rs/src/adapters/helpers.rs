@@ -12,15 +12,15 @@ use serde::Serialize;
 /// Note: the caller is responsible for deciding whether to pass this to the extension at all —
 /// when the caller does not specify a poll timeout/interval, we omit the parameter from the SQL
 /// entirely so the extension's own defaults apply (rather than hard-coding our own).
-pub fn poll_timeout_secs(d: std::time::Duration) -> i32 {
-    i32::try_from(d.as_secs()).unwrap_or(i32::MAX)
+pub fn poll_timeout_secs(dur: std::time::Duration) -> i32 {
+    i32::try_from(dur.as_secs()).unwrap_or(i32::MAX)
 }
 
 /// Convert a `Duration` to milliseconds as `i32`, clamping on overflow. Used both for poll
 /// intervals (`read_*_with_poll`) and notify-insert throttle intervals (`enable_notify_insert`
 /// / `update_notify_insert`).
-pub fn duration_as_ms_i32(d: std::time::Duration) -> i32 {
-    i32::try_from(d.as_millis()).unwrap_or(i32::MAX)
+pub fn duration_as_ms_i32(dur: std::time::Duration) -> i32 {
+    i32::try_from(dur.as_millis()).unwrap_or(i32::MAX)
 }
 
 pub fn serialize_list<T: Serialize>(
@@ -32,10 +32,7 @@ pub fn serialize_list<T: Serialize>(
 pub fn serialize_optional_list<H: Serialize>(
     list: Option<&[H]>,
 ) -> Result<Option<Vec<serde_json::Value>>, serde_json::Error> {
-    match list {
-        Some(l) => Ok(Some(serialize_list(l)?)),
-        None => Ok(None),
-    }
+    list.map(serialize_list).transpose()
 }
 
 /// Build the schema-qualified Postgres table name for a pgmq queue. The pgmq extension stores

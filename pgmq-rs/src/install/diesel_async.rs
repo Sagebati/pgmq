@@ -53,7 +53,7 @@ pub async fn installed_version(
     conn.transaction::<_, PgmqError, _>(async |conn| {
         create_migrations_table(conn).await?;
         let applied = fetch_applied(conn).await?;
-        Ok(applied.into_iter().map(|a| a.version).max())
+        Ok(applied.into_iter().map(|mig| mig.version).max())
     })
     .await
 }
@@ -114,10 +114,10 @@ async fn fetch_applied(conn: &mut AsyncPgConnection) -> Result<Vec<AppliedMigrat
     let rows: Vec<AppliedMigrationRow> =
         sql_query(SELECT_APPLIED_MIGRATIONS_SQL).load(conn).await?;
     rows.into_iter()
-        .map(|r| {
+        .map(|row| {
             Ok(AppliedMigration {
-                name: r.name,
-                version: Version::from_str(&r.version)?,
+                name: row.name,
+                version: Version::from_str(&row.version)?,
             })
         })
         .collect()

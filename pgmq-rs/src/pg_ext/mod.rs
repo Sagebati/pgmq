@@ -237,7 +237,7 @@ pub trait Queue {
                 poll_interval,
             )
             .await?
-            .and_then(|v| v.into_iter().next()))
+            .and_then(|rows| rows.into_iter().next()))
     }
 
     async fn read_batch_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(

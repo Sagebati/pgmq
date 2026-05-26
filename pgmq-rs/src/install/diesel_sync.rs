@@ -46,7 +46,7 @@ pub fn installed_version(conn: &mut PgConnection) -> Result<Option<Version>, Pgm
     conn.transaction::<_, PgmqError, _>(|conn| {
         create_migrations_table(conn)?;
         let applied = fetch_applied(conn)?;
-        Ok(applied.into_iter().map(|a| a.version).max())
+        Ok(applied.into_iter().map(|mig| mig.version).max())
     })
 }
 
@@ -81,10 +81,10 @@ fn create_migrations_table(conn: &mut PgConnection) -> Result<(), PgmqError> {
 fn fetch_applied(conn: &mut PgConnection) -> Result<Vec<AppliedMigration>, PgmqError> {
     let rows: Vec<AppliedMigrationRow> = sql_query(SELECT_APPLIED_MIGRATIONS_SQL).load(conn)?;
     rows.into_iter()
-        .map(|r| {
+        .map(|row| {
             Ok(AppliedMigration {
-                name: r.name,
-                version: Version::from_str(&r.version)?,
+                name: row.name,
+                version: Version::from_str(&row.version)?,
             })
         })
         .collect()

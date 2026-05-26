@@ -203,42 +203,42 @@ mod imp {
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn create<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
         queue_name: &str,
     ) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        c.execute(query::CREATE, &[&queue_name]).await?;
+        conn.execute(query::CREATE, &[&queue_name]).await?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn create_unlogged<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
         queue_name: &str,
     ) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        c.execute(query::CREATE_UNLOGGED, &[&queue_name]).await?;
+        conn.execute(query::CREATE_UNLOGGED, &[&queue_name]).await?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn create_partitioned<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
         queue_name: &str,
     ) -> Result<bool, PgmqError> {
         check_input(queue_name)?;
         let queue_table = queue_table_name(queue_name);
-        let row = c
+        let row = conn
             .query_one(query::CREATE_PARTITIONED_EXISTS_CHECK, &[&queue_table])
             .await?;
         let exists: bool = row.try_get("exists")?;
         if exists {
             return Ok(false);
         }
-        c.execute(query::CREATE_PARTITIONED, &[&queue_name]).await?;
+        conn.execute(query::CREATE_PARTITIONED, &[&queue_name]).await?;
         Ok(true)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn convert_archive_partitioned<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
         table_name: &str,
         partition_interval: Option<&str>,
         retention_interval: Option<&str>,
@@ -248,38 +248,38 @@ mod imp {
             retention_interval.is_some(),
         );
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![&table_name];
-        if let Some(p) = &partition_interval {
-            params.push(p);
+        if let Some(partition) = &partition_interval {
+            params.push(partition);
         }
-        if let Some(r) = &retention_interval {
-            params.push(r);
+        if let Some(retention) = &retention_interval {
+            params.push(retention);
         }
-        c.execute(sql.as_str(), &params).await?;
+        conn.execute(sql.as_str(), &params).await?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn drop_queue<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
         queue_name: &str,
     ) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        c.execute(query::DROP_QUEUE, &[&queue_name]).await?;
+        conn.execute(query::DROP_QUEUE, &[&queue_name]).await?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn purge_queue<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
         queue_name: &str,
     ) -> Result<i64, PgmqError> {
         check_input(queue_name)?;
-        let row = c.query_one(query::PURGE_QUEUE, &[&queue_name]).await?;
+        let row = conn.query_one(query::PURGE_QUEUE, &[&queue_name]).await?;
         Ok(row.try_get("purge_queue")?)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn list_queues<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
     ) -> Result<Option<Vec<PGMQueueMeta>>, PgmqError> {
-        let rows = c.query(query::LIST_QUEUES, &[]).await?;
+        let rows = conn.query(query::LIST_QUEUES, &[]).await?;
         if rows.is_empty() {
             return Ok(None);
         }
@@ -293,14 +293,14 @@ mod imp {
         C: GenericClient + Sync,
         T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
     >(
-        c: &C,
+        conn: &C,
         queue_name: &str,
         msg_id: i64,
         visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Message<T>, PgmqError> {
         check_input(queue_name)?;
         let vt_secs = visibility_timeout.into().as_seconds();
-        let row = c
+        let row = conn
             .query_one(query::SET_VT, &[&queue_name, &msg_id, &vt_secs])
             .await?;
         Message::<T>::from_tokio_postgres_row(&row)
@@ -312,7 +312,7 @@ mod imp {
         T: Serialize + Send + Sync,
         H: Serialize + Send + Sync,
     >(
-        c: &C,
+        conn: &C,
         queue_name: &str,
         message: &T,
         headers: Option<&H>,
@@ -322,7 +322,7 @@ mod imp {
         let message = serde_json::to_value(message)?;
         let headers = headers.map(serde_json::to_value).transpose()?;
         let delay_secs = delay.into().as_seconds();
-        let row = c
+        let row = conn
             .query_one(query::SEND, &[&queue_name, &message, &headers, &delay_secs])
             .await?;
         Ok(row.try_get("send")?)
@@ -333,7 +333,7 @@ mod imp {
         T: Serialize + Send + Sync,
         H: Serialize + Send + Sync,
     >(
-        c: &C,
+        conn: &C,
         queue_name: &str,
         messages: &[T],
         headers: Option<&[H]>,
@@ -343,14 +343,14 @@ mod imp {
         let messages = serialize_list(messages)?;
         let headers = serialize_optional_list(headers)?;
         let delay_secs = delay.into().as_seconds();
-        let rows = c
+        let rows = conn
             .query(
                 query::SEND_BATCH,
                 &[&queue_name, &messages, &headers, &delay_secs],
             )
             .await?;
         rows.iter()
-            .map(|r| r.try_get("send_batch").map_err(Into::into))
+            .map(|row| row.try_get("send_batch").map_err(Into::into))
             .collect()
     }
 
@@ -359,14 +359,14 @@ mod imp {
         C: GenericClient + Sync,
         T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
     >(
-        c: &C,
+        conn: &C,
         queue_name: &str,
         visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let vt_secs = visibility_timeout.into().as_seconds();
-        let rows = c.query(query::READ, &[&queue_name, &vt_secs, &qty]).await?;
+        let rows = conn.query(query::READ, &[&queue_name, &vt_secs, &qty]).await?;
         rows.iter()
             .map(Message::<T>::from_tokio_postgres_row)
             .collect()
@@ -377,7 +377,7 @@ mod imp {
         C: GenericClient + Sync,
         T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
     >(
-        c: &C,
+        conn: &C,
         queue_name: &str,
         visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         max_batch_size: i32,
@@ -396,7 +396,7 @@ mod imp {
         if let Some(pi) = pi.as_ref() {
             params.push(pi);
         }
-        let rows = c.query(&sql, &params).await?;
+        let rows = conn.query(&sql, &params).await?;
         rows.iter()
             .map(Message::<T>::from_tokio_postgres_row)
             .collect()
@@ -407,14 +407,14 @@ mod imp {
         C: GenericClient + Sync,
         T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
     >(
-        c: &C,
+        conn: &C,
         queue_name: &str,
         visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let vt_secs = visibility_timeout.into().as_seconds();
-        let rows = c
+        let rows = conn
             .query(query::READ_GROUPED, &[&queue_name, &vt_secs, &qty])
             .await?;
         rows.iter()
@@ -426,7 +426,7 @@ mod imp {
         C: GenericClient + Sync,
         T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
     >(
-        c: &C,
+        conn: &C,
         queue_name: &str,
         visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
@@ -446,7 +446,7 @@ mod imp {
         if let Some(pi) = pi.as_ref() {
             params.push(pi);
         }
-        let rows = c.query(&sql, &params).await?;
+        let rows = conn.query(&sql, &params).await?;
         rows.iter()
             .map(Message::<T>::from_tokio_postgres_row)
             .collect()
@@ -456,14 +456,14 @@ mod imp {
         C: GenericClient + Sync,
         T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
     >(
-        c: &C,
+        conn: &C,
         queue_name: &str,
         visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let vt_secs = visibility_timeout.into().as_seconds();
-        let rows = c
+        let rows = conn
             .query(query::READ_GROUPED_HEAD, &[&queue_name, &vt_secs, &qty])
             .await?;
         rows.iter()
@@ -475,14 +475,14 @@ mod imp {
         C: GenericClient + Sync,
         T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
     >(
-        c: &C,
+        conn: &C,
         queue_name: &str,
         visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let vt_secs = visibility_timeout.into().as_seconds();
-        let rows = c
+        let rows = conn
             .query(query::READ_GROUPED_RR, &[&queue_name, &vt_secs, &qty])
             .await?;
         rows.iter()
@@ -494,7 +494,7 @@ mod imp {
         C: GenericClient + Sync,
         T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
     >(
-        c: &C,
+        conn: &C,
         queue_name: &str,
         visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
@@ -514,7 +514,7 @@ mod imp {
         if let Some(pi) = pi.as_ref() {
             params.push(pi);
         }
-        let rows = c.query(&sql, &params).await?;
+        let rows = conn.query(&sql, &params).await?;
         rows.iter()
             .map(Message::<T>::from_tokio_postgres_row)
             .collect()
@@ -522,22 +522,22 @@ mod imp {
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn archive<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
         queue_name: &str,
         msg_id: i64,
     ) -> Result<bool, PgmqError> {
         check_input(queue_name)?;
-        let row = c.query_one(query::ARCHIVE, &[&queue_name, &msg_id]).await?;
+        let row = conn.query_one(query::ARCHIVE, &[&queue_name, &msg_id]).await?;
         Ok(row.try_get("archive")?)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn archive_batch<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
         queue_name: &str,
         msg_ids: &[i64],
     ) -> Result<usize, PgmqError> {
         check_input(queue_name)?;
-        let rows = c
+        let rows = conn
             .query(query::ARCHIVE_BATCH, &[&queue_name, &msg_ids])
             .await?;
         Ok(rows.len())
@@ -547,33 +547,33 @@ mod imp {
         C: GenericClient + Sync,
         T: for<'de> Deserialize<'de> + Send + Unpin + 'static,
     >(
-        c: &C,
+        conn: &C,
         queue_name: &str,
     ) -> Result<Option<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let row = c.query_opt(query::POP, &[&queue_name]).await?;
+        let row = conn.query_opt(query::POP, &[&queue_name]).await?;
         row.as_ref()
             .map(Message::<T>::from_tokio_postgres_row)
             .transpose()
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn delete<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
         queue_name: &str,
         msg_id: i64,
     ) -> Result<bool, PgmqError> {
         check_input(queue_name)?;
-        let row = c.query_one(query::DELETE, &[&queue_name, &msg_id]).await?;
+        let row = conn.query_one(query::DELETE, &[&queue_name, &msg_id]).await?;
         Ok(row.try_get("was_deleted")?)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn delete_batch<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
         queue_name: &str,
         msg_ids: &[i64],
     ) -> Result<usize, PgmqError> {
         check_input(queue_name)?;
-        let rows = c
+        let rows = conn
             .query(query::DELETE_BATCH, &[&queue_name, &msg_ids])
             .await?;
         Ok(rows.len())
@@ -581,57 +581,57 @@ mod imp {
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn create_fifo_index<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
         queue_name: &str,
     ) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        c.execute(query::CREATE_FIFO_INDEX, &[&queue_name]).await?;
+        conn.execute(query::CREATE_FIFO_INDEX, &[&queue_name]).await?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn create_fifo_indexes_all<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
     ) -> Result<(), PgmqError> {
-        c.execute(query::CREATE_FIFO_INDEXES_ALL, &[]).await?;
+        conn.execute(query::CREATE_FIFO_INDEXES_ALL, &[]).await?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn bind_topic<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
         pattern: &str,
         queue_name: &str,
     ) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        c.execute(query::BIND_TOPIC, &[&pattern, &queue_name])
+        conn.execute(query::BIND_TOPIC, &[&pattern, &queue_name])
             .await?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn unbind_topic<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
         pattern: &str,
         queue_name: &str,
     ) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        c.execute(query::UNBIND_TOPIC, &[&pattern, &queue_name])
+        conn.execute(query::UNBIND_TOPIC, &[&pattern, &queue_name])
             .await?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn list_topic_bindings<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
         queue_name: &str,
     ) -> Result<Vec<ListTopicBindingsRow>, PgmqError> {
-        let rows = c.query(query::LIST_TOPIC_BINDINGS, &[&queue_name]).await?;
+        let rows = conn.query(query::LIST_TOPIC_BINDINGS, &[&queue_name]).await?;
         rows.iter()
             .map(ListTopicBindingsRow::from_tokio_postgres_row)
             .collect()
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn list_topic_bindings_all<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
     ) -> Result<Vec<ListTopicBindingsRow>, PgmqError> {
-        let rows = c.query(query::LIST_TOPIC_BINDINGS_ALL, &[]).await?;
+        let rows = conn.query(query::LIST_TOPIC_BINDINGS_ALL, &[]).await?;
         rows.iter()
             .map(ListTopicBindingsRow::from_tokio_postgres_row)
             .collect()
@@ -642,7 +642,7 @@ mod imp {
         T: Serialize + Send + Sync,
         H: Serialize + Send + Sync,
     >(
-        c: &C,
+        conn: &C,
         routing_key: &str,
         message: &T,
         headers: Option<&H>,
@@ -651,7 +651,7 @@ mod imp {
         let message = serde_json::to_value(message)?;
         let headers = headers.map(serde_json::to_value).transpose()?;
         let delay_secs = delay.into().as_seconds();
-        let row = c
+        let row = conn
             .query_one(
                 query::SEND_TOPIC,
                 &[&routing_key, &message, &headers, &delay_secs],
@@ -665,7 +665,7 @@ mod imp {
         T: Serialize + Send + Sync,
         H: Serialize + Send + Sync,
     >(
-        c: &C,
+        conn: &C,
         routing_key: &str,
         messages: &[T],
         headers: Option<&[H]>,
@@ -674,7 +674,7 @@ mod imp {
         let messages = serialize_list(messages)?;
         let headers = serialize_optional_list(headers)?;
         let delay_secs = delay.into().as_seconds();
-        let rows = c
+        let rows = conn
             .query(
                 query::SEND_BATCH_TOPIC,
                 &[&routing_key, &messages, &headers, &delay_secs],
@@ -687,61 +687,61 @@ mod imp {
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn enable_notify_insert<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
         queue_name: &str,
         throttle: std::time::Duration,
     ) -> Result<(), PgmqError> {
         check_input(queue_name)?;
         let ms = duration_as_ms_i32(throttle);
-        c.execute(query::ENABLE_NOTIFY_INSERT, &[&queue_name, &ms])
+        conn.execute(query::ENABLE_NOTIFY_INSERT, &[&queue_name, &ms])
             .await?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn disable_notify_insert<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
         queue_name: &str,
     ) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        c.execute(query::DISABLE_NOTIFY_INSERT, &[&queue_name])
+        conn.execute(query::DISABLE_NOTIFY_INSERT, &[&queue_name])
             .await?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn update_notify_insert<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
         queue_name: &str,
         throttle: std::time::Duration,
     ) -> Result<(), PgmqError> {
         check_input(queue_name)?;
         let ms = duration_as_ms_i32(throttle);
-        c.execute(query::UPDATE_NOTIFY_INSERT, &[&queue_name, &ms])
+        conn.execute(query::UPDATE_NOTIFY_INSERT, &[&queue_name, &ms])
             .await?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn list_notify_insert_throttles<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
     ) -> Result<Vec<ListNotifyInsertThrottlesRow>, PgmqError> {
-        let rows = c.query(query::LIST_NOTIFY_INSERT_THROTTLES, &[]).await?;
+        let rows = conn.query(query::LIST_NOTIFY_INSERT_THROTTLES, &[]).await?;
         rows.iter()
             .map(ListNotifyInsertThrottlesRow::from_tokio_postgres_row)
             .collect()
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn metrics<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
         queue_name: &str,
     ) -> Result<QueueMetrics, PgmqError> {
         check_input(queue_name)?;
-        let row = c.query_one(query::METRICS, &[&queue_name]).await?;
+        let row = conn.query_one(query::METRICS, &[&queue_name]).await?;
         QueueMetrics::from_tokio_postgres_row(&row)
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(super) async fn metrics_all<C: GenericClient + Sync>(
-        c: &C,
+        conn: &C,
     ) -> Result<Vec<QueueMetrics>, PgmqError> {
-        let rows = c.query(query::METRICS_ALL, &[]).await?;
+        let rows = conn.query(query::METRICS_ALL, &[]).await?;
         rows.iter()
             .map(QueueMetrics::from_tokio_postgres_row)
             .collect()

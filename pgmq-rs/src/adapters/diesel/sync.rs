@@ -182,16 +182,16 @@ impl Queue for &mut PgConnection {
             partition_interval.is_some(),
             retention_interval.is_some(),
         );
-        let mut q = sql_query(sql)
+        let mut qb = sql_query(sql)
             .into_boxed::<Pg>()
             .bind::<sql_types::Text, _>(table_name);
-        if let Some(p) = partition_interval {
-            q = q.bind::<sql_types::Text, _>(p);
+        if let Some(partition) = partition_interval {
+            qb = qb.bind::<sql_types::Text, _>(partition);
         }
-        if let Some(r) = retention_interval {
-            q = q.bind::<sql_types::Text, _>(r);
+        if let Some(retention) = retention_interval {
+            qb = qb.bind::<sql_types::Text, _>(retention);
         }
-        q.execute(self)?;
+        qb.execute(self)?;
         Ok(())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -273,7 +273,7 @@ impl Queue for &mut PgConnection {
             .bind::<sql_types::Nullable<sql_types::Array<sql_types::Jsonb>>, _>(headers)
             .bind::<sql_types::Integer, _>(delay.into().as_seconds())
             .load(self)?;
-        Ok(rows.into_iter().map(|r| r.send_batch).collect())
+        Ok(rows.into_iter().map(|row| row.send_batch).collect())
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
@@ -301,18 +301,18 @@ impl Queue for &mut PgConnection {
     ) -> Result<Option<Vec<Message<T>>>, PgmqError> {
         check_input(queue_name)?;
         let sql = query::read_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
-        let mut q = sql_query(sql)
+        let mut qb = sql_query(sql)
             .into_boxed::<Pg>()
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::Integer, _>(visibility_timeout.into().as_seconds())
             .bind::<sql_types::Integer, _>(max_batch_size);
-        if let Some(t) = poll_timeout {
-            q = q.bind::<sql_types::Integer, _>(poll_timeout_secs(t));
+        if let Some(timeout) = poll_timeout {
+            qb = qb.bind::<sql_types::Integer, _>(poll_timeout_secs(timeout));
         }
-        if let Some(i) = poll_interval {
-            q = q.bind::<sql_types::Integer, _>(duration_as_ms_i32(i));
+        if let Some(interval) = poll_interval {
+            qb = qb.bind::<sql_types::Integer, _>(duration_as_ms_i32(interval));
         }
-        let rows: Vec<MessageRowJson> = q.load(self)?;
+        let rows: Vec<MessageRowJson> = qb.load(self)?;
         Ok(Some(
             rows.into_iter()
                 .map(MessageRowJson::into_message)
@@ -346,18 +346,18 @@ impl Queue for &mut PgConnection {
         check_input(queue_name)?;
         let sql =
             query::read_grouped_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
-        let mut q = sql_query(sql)
+        let mut qb = sql_query(sql)
             .into_boxed::<Pg>()
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::Integer, _>(visibility_timeout.into().as_seconds())
             .bind::<sql_types::Integer, _>(qty);
-        if let Some(t) = poll_timeout {
-            q = q.bind::<sql_types::Integer, _>(poll_timeout_secs(t));
+        if let Some(timeout) = poll_timeout {
+            qb = qb.bind::<sql_types::Integer, _>(poll_timeout_secs(timeout));
         }
-        if let Some(i) = poll_interval {
-            q = q.bind::<sql_types::Integer, _>(duration_as_ms_i32(i));
+        if let Some(interval) = poll_interval {
+            qb = qb.bind::<sql_types::Integer, _>(duration_as_ms_i32(interval));
         }
-        let rows: Vec<MessageRowJson> = q.load(self)?;
+        let rows: Vec<MessageRowJson> = qb.load(self)?;
         rows.into_iter().map(MessageRowJson::into_message).collect()
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -402,18 +402,18 @@ impl Queue for &mut PgConnection {
         check_input(queue_name)?;
         let sql =
             query::read_grouped_rr_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
-        let mut q = sql_query(sql)
+        let mut qb = sql_query(sql)
             .into_boxed::<Pg>()
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::Integer, _>(visibility_timeout.into().as_seconds())
             .bind::<sql_types::Integer, _>(qty);
-        if let Some(t) = poll_timeout {
-            q = q.bind::<sql_types::Integer, _>(poll_timeout_secs(t));
+        if let Some(timeout) = poll_timeout {
+            qb = qb.bind::<sql_types::Integer, _>(poll_timeout_secs(timeout));
         }
-        if let Some(i) = poll_interval {
-            q = q.bind::<sql_types::Integer, _>(duration_as_ms_i32(i));
+        if let Some(interval) = poll_interval {
+            qb = qb.bind::<sql_types::Integer, _>(duration_as_ms_i32(interval));
         }
-        let rows: Vec<MessageRowJson> = q.load(self)?;
+        let rows: Vec<MessageRowJson> = qb.load(self)?;
         rows.into_iter().map(MessageRowJson::into_message).collect()
     }
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -445,7 +445,7 @@ impl Queue for &mut PgConnection {
             .get_result(self)
             .optional()?;
         match row {
-            Some(r) => Ok(Some(r.into_message()?)),
+            Some(row) => Ok(Some(row.into_message()?)),
             None => Ok(None),
         }
     }

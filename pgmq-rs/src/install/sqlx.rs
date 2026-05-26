@@ -34,7 +34,7 @@ pub async fn installed_version(pool: &PgPool) -> Result<Option<Version>, PgmqErr
     let mut tx = pool.begin().await?;
     create_migrations_table(&mut tx).await?;
     let applied = fetch_applied(&mut tx).await?;
-    let version = applied.into_iter().map(|a| a.version).max();
+    let version = applied.into_iter().map(|mig| mig.version).max();
     tx.commit().await?;
     Ok(version)
 }

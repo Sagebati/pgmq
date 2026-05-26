@@ -36,7 +36,7 @@ pub async fn installed_version(client: &mut Client) -> Result<Option<Version>, P
     let tx = client.transaction().await?;
     create_migrations_table(&tx).await?;
     let applied = fetch_applied(&tx).await?;
-    let version = applied.into_iter().map(|a| a.version).max();
+    let version = applied.into_iter().map(|mig| mig.version).max();
     tx.commit().await?;
     Ok(version)
 }
@@ -88,12 +88,12 @@ async fn create_migrations_table(tx: &Transaction<'_>) -> Result<(), PgmqError> 
 async fn fetch_applied(tx: &Transaction<'_>) -> Result<Vec<AppliedMigration>, PgmqError> {
     let rows = tx.query(SELECT_APPLIED_MIGRATIONS_SQL, &[]).await?;
     rows.into_iter()
-        .map(|r| {
-            let name: String = r.try_get(0).map_err(|e| PgmqError::RowDecodeError {
+        .map(|row| {
+            let name: String = row.try_get(0).map_err(|e| PgmqError::RowDecodeError {
                 column: "name".into(),
                 reason: e.to_string(),
             })?;
-            let ver: String = r.try_get(1).map_err(|e| PgmqError::RowDecodeError {
+            let ver: String = row.try_get(1).map_err(|e| PgmqError::RowDecodeError {
                 column: "version".into(),
                 reason: e.to_string(),
             })?;

@@ -32,14 +32,14 @@ pub fn filter_unapplied_scripts(
     use itertools::Itertools;
     available
         .into_iter()
-        .filter(|script| !applied.iter().any(|a| a.name == script.name.original))
+        .filter(|script| !applied.iter().any(|mig| mig.name == script.name.original))
         .sorted()
         .collect()
 }
 
 /// Find the maximum version among already-applied migrations.
 pub fn max_applied_version(applied: &[AppliedMigration]) -> Option<&Version> {
-    applied.iter().map(|a| &a.version).max()
+    applied.iter().map(|mig| &mig.version).max()
 }
 
 #[cfg(feature = "install-sql-embedded")]

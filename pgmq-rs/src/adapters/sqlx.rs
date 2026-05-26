@@ -96,14 +96,14 @@ where
             retention_interval.is_some(),
         );
         let mut conn = self.acquire().await?;
-        let mut q = sqlx::query(&sql).bind(table_name);
-        if let Some(p) = partition_interval {
-            q = q.bind(p);
+        let mut qb = sqlx::query(&sql).bind(table_name);
+        if let Some(partition) = partition_interval {
+            qb = qb.bind(partition);
         }
-        if let Some(r) = retention_interval {
-            q = q.bind(r);
+        if let Some(retention) = retention_interval {
+            qb = qb.bind(retention);
         }
-        q.execute(&mut *conn).await?;
+        qb.execute(&mut *conn).await?;
         Ok(())
     }
 
@@ -233,17 +233,17 @@ where
         check_input(queue_name)?;
         let sql = query::read_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
         let mut conn = self.acquire().await?;
-        let mut q = sqlx::query_as::<_, Message<T>>(&sql)
+        let mut qb = sqlx::query_as::<_, Message<T>>(&sql)
             .bind(queue_name)
             .bind(visibility_timeout.into().as_seconds())
             .bind(max_batch_size);
-        if let Some(t) = poll_timeout {
-            q = q.bind(poll_timeout_secs(t));
+        if let Some(timeout) = poll_timeout {
+            qb = qb.bind(poll_timeout_secs(timeout));
         }
-        if let Some(i) = poll_interval {
-            q = q.bind(duration_as_ms_i32(i));
+        if let Some(interval) = poll_interval {
+            qb = qb.bind(duration_as_ms_i32(interval));
         }
-        let rows: Vec<Message<T>> = q.fetch_all(&mut *conn).await?;
+        let rows: Vec<Message<T>> = qb.fetch_all(&mut *conn).await?;
         Ok(Some(rows))
     }
 
@@ -277,17 +277,17 @@ where
         let sql =
             query::read_grouped_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
         let mut conn = self.acquire().await?;
-        let mut q = sqlx::query_as::<_, Message<T>>(&sql)
+        let mut qb = sqlx::query_as::<_, Message<T>>(&sql)
             .bind(queue_name)
             .bind(visibility_timeout.into().as_seconds())
             .bind(qty);
-        if let Some(t) = poll_timeout {
-            q = q.bind(poll_timeout_secs(t));
+        if let Some(timeout) = poll_timeout {
+            qb = qb.bind(poll_timeout_secs(timeout));
         }
-        if let Some(i) = poll_interval {
-            q = q.bind(duration_as_ms_i32(i));
+        if let Some(interval) = poll_interval {
+            qb = qb.bind(duration_as_ms_i32(interval));
         }
-        Ok(q.fetch_all(&mut *conn).await?)
+        Ok(qb.fetch_all(&mut *conn).await?)
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -337,17 +337,17 @@ where
         let sql =
             query::read_grouped_rr_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
         let mut conn = self.acquire().await?;
-        let mut q = sqlx::query_as::<_, Message<T>>(&sql)
+        let mut qb = sqlx::query_as::<_, Message<T>>(&sql)
             .bind(queue_name)
             .bind(visibility_timeout.into().as_seconds())
             .bind(qty);
-        if let Some(t) = poll_timeout {
-            q = q.bind(poll_timeout_secs(t));
+        if let Some(timeout) = poll_timeout {
+            qb = qb.bind(poll_timeout_secs(timeout));
         }
-        if let Some(i) = poll_interval {
-            q = q.bind(duration_as_ms_i32(i));
+        if let Some(interval) = poll_interval {
+            qb = qb.bind(duration_as_ms_i32(interval));
         }
-        Ok(q.fetch_all(&mut *conn).await?)
+        Ok(qb.fetch_all(&mut *conn).await?)
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -673,7 +673,7 @@ pub mod listener {
             .map(queue_name_to_insert_notification_channel_name)
             .collect::<Vec<_>>();
         listener
-            .listen_all(channel_names.iter().map(|s| s.as_str()))
+            .listen_all(channel_names.iter().map(String::as_str))
             .await?;
         Ok(listener)
     }
