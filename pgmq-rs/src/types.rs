@@ -119,3 +119,12 @@ pub struct QueueMetrics {
     #[cfg_attr(any(feature = "diesel-async", feature = "diesel-sync"), diesel(sql_type = diesel::sql_types::BigInt))]
     pub queue_visible_length: i64,
 }
+
+// -------- tokio-postgres manual row decoders --------
+//
+// tokio-postgres has no derive macro for `Row -> Struct`, so we hand-write a small
+// `from_tokio_postgres_row` per DTO. Reads columns by name from the wire-protocol decoder.
+
+// Note: tokio-postgres row decoders for the DTOs above live in `adapters/tokio_postgres.rs`
+// (private inherent impls), so the `from_tokio_postgres_row` methods are not part of the
+// public API.

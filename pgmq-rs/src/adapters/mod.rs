@@ -32,18 +32,6 @@ mod helpers;
 ))]
 mod query;
 
-// Shared QueueConn trait + the single blanket `impl<C: QueueConn> Queue for C`. The driver
-// adapters below (siblings) implement QueueConn for their connection types and get the full
-// Queue API via the blanket. The module itself stays private to `adapters`; only its
-// internal items carry outward visibility so the siblings can reach them.
-#[cfg(any(
-    feature = "sqlx",
-    feature = "tokio-postgres",
-    feature = "diesel-async",
-    feature = "diesel-sync"
-))]
-mod queue_conn;
-
 #[cfg(feature = "sqlx")]
 pub mod sqlx;
 
