@@ -39,7 +39,6 @@
 //!
 //! ```ignore
 //! use pgmq::Queue;
-//! use pgmq::pg_ext::VisibilityTimeoutOffset;
 //!
 //! let mut conn = pool.get().await?;        // Object<Manager>, derefs to &mut AsyncPgConnection
 //! conn.create("orders").await?;
@@ -47,7 +46,7 @@
 //! let id = conn.send("orders", &my_order).await?;
 //!
 //! let msg: Option<pgmq::Message<MyOrder>> =
-//!     conn.read("orders", VisibilityTimeoutOffset::seconds(30)).await?;
+//!     conn.read("orders", 30).await?;
 //!
 //! conn.archive("orders", id).await?;
 //! ```
@@ -269,13 +268,13 @@ mod imp {
         conn: &mut AsyncPgConnection,
         queue_name: &str,
         msg_id: i64,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Message<T>, PgmqError> {
         check_input(queue_name)?;
         let row: MessageRowJson = sql_query(query::SET_VT)
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::BigInt, _>(msg_id)
-            .bind::<sql_types::Integer, _>(vt.into().as_seconds())
+            .bind::<sql_types::Integer, _>(visibility_timeout.into().as_seconds())
             .get_result(conn)
             .await?;
         row.into_message()
@@ -335,13 +334,13 @@ mod imp {
     pub(super) async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         conn: &mut AsyncPgConnection,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let rows: Vec<MessageRowJson> = sql_query(query::READ)
             .bind::<sql_types::Text, _>(queue_name)
-            .bind::<sql_types::Integer, _>(vt.into().as_seconds())
+            .bind::<sql_types::Integer, _>(visibility_timeout.into().as_seconds())
             .bind::<sql_types::Integer, _>(qty)
             .load(conn)
             .await?;
@@ -353,7 +352,7 @@ mod imp {
     >(
         conn: &mut AsyncPgConnection,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         max_batch_size: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
@@ -363,7 +362,7 @@ mod imp {
         let mut q = sql_query(sql)
             .into_boxed::<Pg>()
             .bind::<sql_types::Text, _>(queue_name)
-            .bind::<sql_types::Integer, _>(vt.into().as_seconds())
+            .bind::<sql_types::Integer, _>(visibility_timeout.into().as_seconds())
             .bind::<sql_types::Integer, _>(max_batch_size);
         if let Some(t) = poll_timeout {
             q = q.bind::<sql_types::Integer, _>(poll_timeout_secs(t));
@@ -378,13 +377,13 @@ mod imp {
     pub(super) async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         conn: &mut AsyncPgConnection,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let rows: Vec<MessageRowJson> = sql_query(query::READ_GROUPED)
             .bind::<sql_types::Text, _>(queue_name)
-            .bind::<sql_types::Integer, _>(vt.into().as_seconds())
+            .bind::<sql_types::Integer, _>(visibility_timeout.into().as_seconds())
             .bind::<sql_types::Integer, _>(qty)
             .load(conn)
             .await?;
@@ -396,7 +395,7 @@ mod imp {
     >(
         conn: &mut AsyncPgConnection,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
@@ -407,7 +406,7 @@ mod imp {
         let mut q = sql_query(sql)
             .into_boxed::<Pg>()
             .bind::<sql_types::Text, _>(queue_name)
-            .bind::<sql_types::Integer, _>(vt.into().as_seconds())
+            .bind::<sql_types::Integer, _>(visibility_timeout.into().as_seconds())
             .bind::<sql_types::Integer, _>(qty);
         if let Some(t) = poll_timeout {
             q = q.bind::<sql_types::Integer, _>(poll_timeout_secs(t));
@@ -422,13 +421,13 @@ mod imp {
     pub(super) async fn read_grouped_head<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         conn: &mut AsyncPgConnection,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let rows: Vec<MessageRowJson> = sql_query(query::READ_GROUPED_HEAD)
             .bind::<sql_types::Text, _>(queue_name)
-            .bind::<sql_types::Integer, _>(vt.into().as_seconds())
+            .bind::<sql_types::Integer, _>(visibility_timeout.into().as_seconds())
             .bind::<sql_types::Integer, _>(qty)
             .load(conn)
             .await?;
@@ -438,13 +437,13 @@ mod imp {
     pub(super) async fn read_grouped_rr<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         conn: &mut AsyncPgConnection,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let rows: Vec<MessageRowJson> = sql_query(query::READ_GROUPED_RR)
             .bind::<sql_types::Text, _>(queue_name)
-            .bind::<sql_types::Integer, _>(vt.into().as_seconds())
+            .bind::<sql_types::Integer, _>(visibility_timeout.into().as_seconds())
             .bind::<sql_types::Integer, _>(qty)
             .load(conn)
             .await?;
@@ -456,7 +455,7 @@ mod imp {
     >(
         conn: &mut AsyncPgConnection,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
@@ -467,7 +466,7 @@ mod imp {
         let mut q = sql_query(sql)
             .into_boxed::<Pg>()
             .bind::<sql_types::Text, _>(queue_name)
-            .bind::<sql_types::Integer, _>(vt.into().as_seconds())
+            .bind::<sql_types::Integer, _>(visibility_timeout.into().as_seconds())
             .bind::<sql_types::Integer, _>(qty);
         if let Some(t) = poll_timeout {
             q = q.bind::<sql_types::Integer, _>(poll_timeout_secs(t));
@@ -796,9 +795,9 @@ impl Queue for &mut AsyncPgConnection {
         self,
         queue_name: &str,
         msg_id: i64,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Message<T>, PgmqError> {
-        imp::set_vt::<T>(self, queue_name, msg_id, vt).await
+        imp::set_vt::<T>(self, queue_name, msg_id, visibility_timeout).await
     }
     async fn send<T: Serialize + Send + Sync>(
         self,
@@ -858,10 +857,10 @@ impl Queue for &mut AsyncPgConnection {
     async fn read<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Option<Message<T>>, PgmqError> {
         Ok(self
-            .read_batch::<T>(queue_name, vt, 1)
+            .read_batch::<T>(queue_name, visibility_timeout, 1)
             .await?
             .into_iter()
             .next())
@@ -869,81 +868,108 @@ impl Queue for &mut AsyncPgConnection {
     async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
-        imp::read_batch::<T>(self, queue_name, vt, qty).await
+        imp::read_batch::<T>(self, queue_name, visibility_timeout, qty).await
     }
     async fn read_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Option<Message<T>>, PgmqError> {
         Ok(self
-            .read_batch_with_poll::<T>(queue_name, vt, 1, poll_timeout, poll_interval)
+            .read_batch_with_poll::<T>(
+                queue_name,
+                visibility_timeout,
+                1,
+                poll_timeout,
+                poll_interval,
+            )
             .await?
             .and_then(|v| v.into_iter().next()))
     }
     async fn read_batch_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Option<Vec<Message<T>>>, PgmqError> {
         Ok(Some(
-            imp::read_batch_with_poll::<T>(self, queue_name, vt, qty, poll_timeout, poll_interval)
-                .await?,
+            imp::read_batch_with_poll::<T>(
+                self,
+                queue_name,
+                visibility_timeout,
+                qty,
+                poll_timeout,
+                poll_interval,
+            )
+            .await?,
         ))
     }
     async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
-        imp::read_grouped::<T>(self, queue_name, vt, qty).await
+        imp::read_grouped::<T>(self, queue_name, visibility_timeout, qty).await
     }
     async fn read_grouped_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Vec<Message<T>>, PgmqError> {
-        imp::read_grouped_with_poll::<T>(self, queue_name, vt, qty, poll_timeout, poll_interval)
-            .await
+        imp::read_grouped_with_poll::<T>(
+            self,
+            queue_name,
+            visibility_timeout,
+            qty,
+            poll_timeout,
+            poll_interval,
+        )
+        .await
     }
     async fn read_grouped_head<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
-        imp::read_grouped_head::<T>(self, queue_name, vt, qty).await
+        imp::read_grouped_head::<T>(self, queue_name, visibility_timeout, qty).await
     }
     async fn read_grouped_rr<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
-        imp::read_grouped_rr::<T>(self, queue_name, vt, qty).await
+        imp::read_grouped_rr::<T>(self, queue_name, visibility_timeout, qty).await
     }
     async fn read_grouped_rr_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Vec<Message<T>>, PgmqError> {
-        imp::read_grouped_rr_with_poll::<T>(self, queue_name, vt, qty, poll_timeout, poll_interval)
-            .await
+        imp::read_grouped_rr_with_poll::<T>(
+            self,
+            queue_name,
+            visibility_timeout,
+            qty,
+            poll_timeout,
+            poll_interval,
+        )
+        .await
     }
     async fn archive(self, queue_name: &str, msg_id: i64) -> Result<bool, PgmqError> {
         imp::archive(self, queue_name, msg_id).await

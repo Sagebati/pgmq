@@ -53,13 +53,12 @@
 //!
 //! ```ignore
 //! use pgmq::Queue;
-//! use pgmq::pg_ext::VisibilityTimeoutOffset;
 //!
 //! let client = pool.get().await?;        // e.g. deadpool_postgres::Client — derefs to &Client
 //! client.create("orders").await?;        // auto-deref + auto-ref does the rest
 //! let id = client.send("orders", &my_order).await?;
 //! let msg: Option<pgmq::Message<MyOrder>> =
-//!     client.read("orders", VisibilityTimeoutOffset::seconds(30)).await?;
+//!     client.read("orders", 30).await?;
 //! client.archive("orders", id).await?;
 //! ```
 //!
@@ -296,10 +295,10 @@ mod imp {
         c: &C,
         queue_name: &str,
         msg_id: i64,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Message<T>, PgmqError> {
         check_input(queue_name)?;
-        let vt_secs = vt.into().as_seconds();
+        let vt_secs = visibility_timeout.into().as_seconds();
         let row = c
             .query_one(query::SET_VT, &[&queue_name, &msg_id, &vt_secs])
             .await?;
@@ -364,11 +363,11 @@ mod imp {
     >(
         c: &C,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let vt_secs = vt.into().as_seconds();
+        let vt_secs = visibility_timeout.into().as_seconds();
         let rows = c.query(query::READ, &[&queue_name, &vt_secs, &qty]).await?;
         rows.iter()
             .map(Message::<T>::from_tokio_postgres_row)
@@ -382,13 +381,13 @@ mod imp {
     >(
         c: &C,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         max_batch_size: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let vt_secs = vt.into().as_seconds();
+        let vt_secs = visibility_timeout.into().as_seconds();
         let sql = query::read_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![&queue_name, &vt_secs, &max_batch_size];
         let pt = poll_timeout.map(poll_timeout_secs);
@@ -412,11 +411,11 @@ mod imp {
     >(
         c: &C,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let vt_secs = vt.into().as_seconds();
+        let vt_secs = visibility_timeout.into().as_seconds();
         let rows = c
             .query(query::READ_GROUPED, &[&queue_name, &vt_secs, &qty])
             .await?;
@@ -431,13 +430,13 @@ mod imp {
     >(
         c: &C,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let vt_secs = vt.into().as_seconds();
+        let vt_secs = visibility_timeout.into().as_seconds();
         let sql =
             query::read_grouped_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![&queue_name, &vt_secs, &qty];
@@ -461,11 +460,11 @@ mod imp {
     >(
         c: &C,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let vt_secs = vt.into().as_seconds();
+        let vt_secs = visibility_timeout.into().as_seconds();
         let rows = c
             .query(query::READ_GROUPED_HEAD, &[&queue_name, &vt_secs, &qty])
             .await?;
@@ -480,11 +479,11 @@ mod imp {
     >(
         c: &C,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let vt_secs = vt.into().as_seconds();
+        let vt_secs = visibility_timeout.into().as_seconds();
         let rows = c
             .query(query::READ_GROUPED_RR, &[&queue_name, &vt_secs, &qty])
             .await?;
@@ -499,13 +498,13 @@ mod imp {
     >(
         c: &C,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
-        let vt_secs = vt.into().as_seconds();
+        let vt_secs = visibility_timeout.into().as_seconds();
         let sql =
             query::read_grouped_rr_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![&queue_name, &vt_secs, &qty];
@@ -792,9 +791,9 @@ impl Queue for &tokio_postgres::Client {
         self,
         queue_name: &str,
         msg_id: i64,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Message<T>, PgmqError> {
-        imp::set_vt::<_, T>(self, queue_name, msg_id, vt).await
+        imp::set_vt::<_, T>(self, queue_name, msg_id, visibility_timeout).await
     }
     async fn send<T: Serialize + Send + Sync>(
         self,
@@ -854,10 +853,10 @@ impl Queue for &tokio_postgres::Client {
     async fn read<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Option<Message<T>>, PgmqError> {
         Ok(self
-            .read_batch::<T>(queue_name, vt, 1)
+            .read_batch::<T>(queue_name, visibility_timeout, 1)
             .await?
             .into_iter()
             .next())
@@ -865,27 +864,33 @@ impl Queue for &tokio_postgres::Client {
     async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
-        imp::read_batch::<_, T>(self, queue_name, vt, qty).await
+        imp::read_batch::<_, T>(self, queue_name, visibility_timeout, qty).await
     }
     async fn read_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Option<Message<T>>, PgmqError> {
         Ok(self
-            .read_batch_with_poll::<T>(queue_name, vt, 1, poll_timeout, poll_interval)
+            .read_batch_with_poll::<T>(
+                queue_name,
+                visibility_timeout,
+                1,
+                poll_timeout,
+                poll_interval,
+            )
             .await?
             .and_then(|v| v.into_iter().next()))
     }
     async fn read_batch_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
@@ -894,7 +899,7 @@ impl Queue for &tokio_postgres::Client {
             imp::read_batch_with_poll::<_, T>(
                 self,
                 queue_name,
-                vt,
+                visibility_timeout,
                 qty,
                 poll_timeout,
                 poll_interval,
@@ -905,42 +910,49 @@ impl Queue for &tokio_postgres::Client {
     async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
-        imp::read_grouped::<_, T>(self, queue_name, vt, qty).await
+        imp::read_grouped::<_, T>(self, queue_name, visibility_timeout, qty).await
     }
     async fn read_grouped_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Vec<Message<T>>, PgmqError> {
-        imp::read_grouped_with_poll::<_, T>(self, queue_name, vt, qty, poll_timeout, poll_interval)
-            .await
+        imp::read_grouped_with_poll::<_, T>(
+            self,
+            queue_name,
+            visibility_timeout,
+            qty,
+            poll_timeout,
+            poll_interval,
+        )
+        .await
     }
     async fn read_grouped_head<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
-        imp::read_grouped_head::<_, T>(self, queue_name, vt, qty).await
+        imp::read_grouped_head::<_, T>(self, queue_name, visibility_timeout, qty).await
     }
     async fn read_grouped_rr<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
-        imp::read_grouped_rr::<_, T>(self, queue_name, vt, qty).await
+        imp::read_grouped_rr::<_, T>(self, queue_name, visibility_timeout, qty).await
     }
     async fn read_grouped_rr_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
@@ -948,7 +960,7 @@ impl Queue for &tokio_postgres::Client {
         imp::read_grouped_rr_with_poll::<_, T>(
             self,
             queue_name,
-            vt,
+            visibility_timeout,
             qty,
             poll_timeout,
             poll_interval,
@@ -1075,9 +1087,9 @@ impl Queue for &tokio_postgres::Transaction<'_> {
         self,
         queue_name: &str,
         msg_id: i64,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Message<T>, PgmqError> {
-        imp::set_vt::<_, T>(self, queue_name, msg_id, vt).await
+        imp::set_vt::<_, T>(self, queue_name, msg_id, visibility_timeout).await
     }
     async fn send<T: Serialize + Send + Sync>(
         self,
@@ -1137,10 +1149,10 @@ impl Queue for &tokio_postgres::Transaction<'_> {
     async fn read<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Option<Message<T>>, PgmqError> {
         Ok(self
-            .read_batch::<T>(queue_name, vt, 1)
+            .read_batch::<T>(queue_name, visibility_timeout, 1)
             .await?
             .into_iter()
             .next())
@@ -1148,27 +1160,33 @@ impl Queue for &tokio_postgres::Transaction<'_> {
     async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
-        imp::read_batch::<_, T>(self, queue_name, vt, qty).await
+        imp::read_batch::<_, T>(self, queue_name, visibility_timeout, qty).await
     }
     async fn read_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Option<Message<T>>, PgmqError> {
         Ok(self
-            .read_batch_with_poll::<T>(queue_name, vt, 1, poll_timeout, poll_interval)
+            .read_batch_with_poll::<T>(
+                queue_name,
+                visibility_timeout,
+                1,
+                poll_timeout,
+                poll_interval,
+            )
             .await?
             .and_then(|v| v.into_iter().next()))
     }
     async fn read_batch_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
@@ -1177,7 +1195,7 @@ impl Queue for &tokio_postgres::Transaction<'_> {
             imp::read_batch_with_poll::<_, T>(
                 self,
                 queue_name,
-                vt,
+                visibility_timeout,
                 qty,
                 poll_timeout,
                 poll_interval,
@@ -1188,42 +1206,49 @@ impl Queue for &tokio_postgres::Transaction<'_> {
     async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
-        imp::read_grouped::<_, T>(self, queue_name, vt, qty).await
+        imp::read_grouped::<_, T>(self, queue_name, visibility_timeout, qty).await
     }
     async fn read_grouped_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Vec<Message<T>>, PgmqError> {
-        imp::read_grouped_with_poll::<_, T>(self, queue_name, vt, qty, poll_timeout, poll_interval)
-            .await
+        imp::read_grouped_with_poll::<_, T>(
+            self,
+            queue_name,
+            visibility_timeout,
+            qty,
+            poll_timeout,
+            poll_interval,
+        )
+        .await
     }
     async fn read_grouped_head<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
-        imp::read_grouped_head::<_, T>(self, queue_name, vt, qty).await
+        imp::read_grouped_head::<_, T>(self, queue_name, visibility_timeout, qty).await
     }
     async fn read_grouped_rr<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
-        imp::read_grouped_rr::<_, T>(self, queue_name, vt, qty).await
+        imp::read_grouped_rr::<_, T>(self, queue_name, visibility_timeout, qty).await
     }
     async fn read_grouped_rr_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
@@ -1231,7 +1256,7 @@ impl Queue for &tokio_postgres::Transaction<'_> {
         imp::read_grouped_rr_with_poll::<_, T>(
             self,
             queue_name,
-            vt,
+            visibility_timeout,
             qty,
             poll_timeout,
             poll_interval,

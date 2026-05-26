@@ -44,7 +44,6 @@
 //!
 //! ```rust,no_run
 //! use pgmq::{PgmqError, Message, Queue};
-//! use pgmq::pg_ext::VisibilityTimeoutOffset;
 //! use serde::{Deserialize, Serialize};
 //!
 //! #[tokio::main]
@@ -64,7 +63,7 @@
 //!     let msg_id = conn.send("my_queue", &MyMessage { foo: "bar".into() }).await?;
 //!
 //!     let received: Option<Message<MyMessage>> = conn
-//!         .read("my_queue", VisibilityTimeoutOffset::seconds(30)).await?;
+//!         .read("my_queue", 30).await?;
 //!     if let Some(msg) = received {
 //!         assert_eq!(msg.msg_id, msg_id);
 //!         conn.archive("my_queue", msg.msg_id).await?;

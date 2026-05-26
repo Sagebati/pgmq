@@ -167,9 +167,11 @@ impl PGMQueueExt {
         &self,
         queue_name: &str,
         msg_id: i64,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Message<T>, PgmqError> {
-        (&self.connection).set_vt(queue_name, msg_id, vt).await
+        (&self.connection)
+            .set_vt(queue_name, msg_id, visibility_timeout)
+            .await
     }
 
     #[deprecated = "use the `pgmq::Queue` trait on your sqlx pool/connection/transaction directly"]
@@ -247,31 +249,35 @@ impl PGMQueueExt {
     pub async fn read<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         &self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Option<Message<T>>, PgmqError> {
-        (&self.connection).read(queue_name, vt).await
+        (&self.connection)
+            .read(queue_name, visibility_timeout)
+            .await
     }
 
     #[deprecated = "use the `pgmq::Queue` trait on your sqlx pool/connection/transaction directly"]
     pub async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         &self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
-        (&self.connection).read_batch(queue_name, vt, qty).await
+        (&self.connection)
+            .read_batch(queue_name, visibility_timeout, qty)
+            .await
     }
 
     #[deprecated = "use the `pgmq::Queue` trait on your sqlx pool/connection/transaction directly"]
     pub async fn read_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         &self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Option<Message<T>>, PgmqError> {
         (&self.connection)
-            .read_with_poll(queue_name, vt, poll_timeout, poll_interval)
+            .read_with_poll(queue_name, visibility_timeout, poll_timeout, poll_interval)
             .await
     }
 
@@ -279,13 +285,19 @@ impl PGMQueueExt {
     pub async fn read_batch_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         &self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         max_batch_size: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Option<Vec<Message<T>>>, PgmqError> {
         (&self.connection)
-            .read_batch_with_poll(queue_name, vt, max_batch_size, poll_timeout, poll_interval)
+            .read_batch_with_poll(
+                queue_name,
+                visibility_timeout,
+                max_batch_size,
+                poll_timeout,
+                poll_interval,
+            )
             .await
     }
 
@@ -293,23 +305,31 @@ impl PGMQueueExt {
     pub async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         &self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
-        (&self.connection).read_grouped(queue_name, vt, qty).await
+        (&self.connection)
+            .read_grouped(queue_name, visibility_timeout, qty)
+            .await
     }
 
     #[deprecated = "use the `pgmq::Queue` trait on your sqlx pool/connection/transaction directly"]
     pub async fn read_grouped_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         &self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         (&self.connection)
-            .read_grouped_with_poll(queue_name, vt, qty, poll_timeout, poll_interval)
+            .read_grouped_with_poll(
+                queue_name,
+                visibility_timeout,
+                qty,
+                poll_timeout,
+                poll_interval,
+            )
             .await
     }
 
@@ -317,11 +337,11 @@ impl PGMQueueExt {
     pub async fn read_grouped_head<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         &self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         (&self.connection)
-            .read_grouped_head(queue_name, vt, qty)
+            .read_grouped_head(queue_name, visibility_timeout, qty)
             .await
     }
 
@@ -329,11 +349,11 @@ impl PGMQueueExt {
     pub async fn read_grouped_rr<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         &self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         (&self.connection)
-            .read_grouped_rr(queue_name, vt, qty)
+            .read_grouped_rr(queue_name, visibility_timeout, qty)
             .await
     }
 
@@ -343,13 +363,19 @@ impl PGMQueueExt {
     >(
         &self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         (&self.connection)
-            .read_grouped_rr_with_poll(queue_name, vt, qty, poll_timeout, poll_interval)
+            .read_grouped_rr_with_poll(
+                queue_name,
+                visibility_timeout,
+                qty,
+                poll_timeout,
+                poll_interval,
+            )
             .await
     }
 

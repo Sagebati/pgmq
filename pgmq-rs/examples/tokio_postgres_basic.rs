@@ -5,7 +5,6 @@
 //!     --example tokio_postgres_basic
 
 use deadpool_postgres::{Config, ManagerConfig, RecyclingMethod, Runtime};
-use pgmq::pg_ext::VisibilityTimeoutOffset;
 use pgmq::Queue;
 use serde::{Deserialize, Serialize};
 use tokio_postgres::NoTls;
@@ -55,7 +54,7 @@ async fn main() {
     println!("sent msg_id={id}");
 
     let received: pgmq::Message<MyMessage> = client
-        .read(queue, VisibilityTimeoutOffset::seconds(30))
+        .read(queue, 30)
         .await
         .expect("read")
         .expect("got a message");

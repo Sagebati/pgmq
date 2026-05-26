@@ -6,7 +6,6 @@
 //! What this shows: the pattern "insert into my own table AND enqueue a message, atomically."
 //! Either both happen, or neither does.
 
-use pgmq::pg_ext::VisibilityTimeoutOffset;
 use pgmq::Queue;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
@@ -77,7 +76,7 @@ async fn main() {
 
     let mut conn = pool.acquire().await.expect("acquire");
     let msg: pgmq::Message<OrderShipped> = conn
-        .read(queue, VisibilityTimeoutOffset::seconds(10))
+        .read(queue, 10)
         .await
         .expect("read")
         .expect("message present");

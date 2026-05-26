@@ -1,4 +1,3 @@
-use pgmq::pg_ext::VisibilityTimeoutOffset;
 use pgmq::{Message, Queue};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -45,7 +44,7 @@ async fn main() {
         .await
         .expect("failed to send message");
     let received: Message<MyMessage> = conn
-        .read("my_queue", VisibilityTimeoutOffset::seconds(15))
+        .read("my_queue", 15)
         .await
         .unwrap()
         .expect("No messages in the queue");

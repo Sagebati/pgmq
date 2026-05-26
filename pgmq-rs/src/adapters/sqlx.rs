@@ -146,14 +146,14 @@ where
         self,
         queue_name: &str,
         msg_id: i64,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Message<T>, PgmqError> {
         check_input(queue_name)?;
         let mut conn = self.acquire().await?;
         Ok(sqlx::query_as::<_, Message<T>>(query::SET_VT)
             .bind(queue_name)
             .bind(msg_id)
-            .bind(vt.into().as_seconds())
+            .bind(visibility_timeout.into().as_seconds())
             .fetch_one(&mut *conn)
             .await?)
     }
@@ -252,10 +252,10 @@ where
     async fn read<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Option<Message<T>>, PgmqError> {
         Ok(self
-            .read_batch::<T>(queue_name, vt, 1)
+            .read_batch::<T>(queue_name, visibility_timeout, 1)
             .await?
             .into_iter()
             .next())
@@ -265,14 +265,14 @@ where
     async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let mut conn = self.acquire().await?;
         Ok(sqlx::query_as::<_, Message<T>>(query::READ)
             .bind(queue_name)
-            .bind(vt.into().as_seconds())
+            .bind(visibility_timeout.into().as_seconds())
             .bind(qty)
             .fetch_all(&mut *conn)
             .await?)
@@ -282,12 +282,18 @@ where
     async fn read_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Option<Message<T>>, PgmqError> {
         Ok(self
-            .read_batch_with_poll::<T>(queue_name, vt, 1, poll_timeout, poll_interval)
+            .read_batch_with_poll::<T>(
+                queue_name,
+                visibility_timeout,
+                1,
+                poll_timeout,
+                poll_interval,
+            )
             .await?
             .and_then(|v| v.into_iter().next()))
     }
@@ -296,7 +302,7 @@ where
     async fn read_batch_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         max_batch_size: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
@@ -306,7 +312,7 @@ where
         let mut conn = self.acquire().await?;
         let mut q = sqlx::query_as::<_, Message<T>>(&sql)
             .bind(queue_name)
-            .bind(vt.into().as_seconds())
+            .bind(visibility_timeout.into().as_seconds())
             .bind(max_batch_size);
         if let Some(t) = poll_timeout {
             q = q.bind(poll_timeout_secs(t));
@@ -322,14 +328,14 @@ where
     async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let mut conn = self.acquire().await?;
         Ok(sqlx::query_as::<_, Message<T>>(query::READ_GROUPED)
             .bind(queue_name)
-            .bind(vt.into().as_seconds())
+            .bind(visibility_timeout.into().as_seconds())
             .bind(qty)
             .fetch_all(&mut *conn)
             .await?)
@@ -339,7 +345,7 @@ where
     async fn read_grouped_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
@@ -350,7 +356,7 @@ where
         let mut conn = self.acquire().await?;
         let mut q = sqlx::query_as::<_, Message<T>>(&sql)
             .bind(queue_name)
-            .bind(vt.into().as_seconds())
+            .bind(visibility_timeout.into().as_seconds())
             .bind(qty);
         if let Some(t) = poll_timeout {
             q = q.bind(poll_timeout_secs(t));
@@ -365,14 +371,14 @@ where
     async fn read_grouped_head<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let mut conn = self.acquire().await?;
         Ok(sqlx::query_as::<_, Message<T>>(query::READ_GROUPED_HEAD)
             .bind(queue_name)
-            .bind(vt.into().as_seconds())
+            .bind(visibility_timeout.into().as_seconds())
             .bind(qty)
             .fetch_all(&mut *conn)
             .await?)
@@ -382,14 +388,14 @@ where
     async fn read_grouped_rr<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError> {
         check_input(queue_name)?;
         let mut conn = self.acquire().await?;
         Ok(sqlx::query_as::<_, Message<T>>(query::READ_GROUPED_RR)
             .bind(queue_name)
-            .bind(vt.into().as_seconds())
+            .bind(visibility_timeout.into().as_seconds())
             .bind(qty)
             .fetch_all(&mut *conn)
             .await?)
@@ -399,7 +405,7 @@ where
     async fn read_grouped_rr_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
@@ -410,7 +416,7 @@ where
         let mut conn = self.acquire().await?;
         let mut q = sqlx::query_as::<_, Message<T>>(&sql)
             .bind(queue_name)
-            .bind(vt.into().as_seconds())
+            .bind(visibility_timeout.into().as_seconds())
             .bind(qty);
         if let Some(t) = poll_timeout {
             q = q.bind(poll_timeout_secs(t));

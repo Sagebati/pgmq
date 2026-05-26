@@ -29,12 +29,13 @@
 //!
 //! ## Visibility timeout
 //!
-//! Most read/dequeue methods accept a [`VisibilityTimeoutOffset`] — how long a message stays
-//! invisible to other consumers after being read. Construct via `seconds(i32)` or via
-//! conversion from `i32` / `i64` / `Duration` / `chrono::Duration`.
+//! Most read/dequeue methods accept any `impl Into<VisibilityTimeoutOffset>` — how long a
+//! message stays invisible to other consumers after being read. Pass a plain integer
+//! (seconds), an `i64`, a `std::time::Duration`, a `chrono::Duration`, or
+//! `VisibilityTimeoutOffset::seconds(i32)` if you want to be explicit.
 //!
 //! ```ignore
-//! conn.read("q", VisibilityTimeoutOffset::seconds(30)).await?;
+//! conn.read("q", 30).await?;
 //! ```
 //!
 //! ## Composing with transactions
@@ -105,7 +106,7 @@ pub trait Queue {
         self,
         queue_name: &str,
         msg_id: i64,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Message<T>, PgmqError>;
 
     /// Send a message. Returns its msg_id.
@@ -160,20 +161,20 @@ pub trait Queue {
     async fn read<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<Option<Message<T>>, PgmqError>;
 
     async fn read_batch<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError>;
 
     async fn read_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
     ) -> Result<Option<Message<T>>, PgmqError>;
@@ -181,7 +182,7 @@ pub trait Queue {
     async fn read_batch_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         max_batch_size: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
@@ -190,14 +191,14 @@ pub trait Queue {
     async fn read_grouped<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError>;
 
     async fn read_grouped_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
@@ -206,21 +207,21 @@ pub trait Queue {
     async fn read_grouped_head<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError>;
 
     async fn read_grouped_rr<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
     ) -> Result<Vec<Message<T>>, PgmqError>;
 
     async fn read_grouped_rr_with_poll<T: for<'de> Deserialize<'de> + Send + Unpin + 'static>(
         self,
         queue_name: &str,
-        vt: impl Into<VisibilityTimeoutOffset> + Send,
+        visibility_timeout: impl Into<VisibilityTimeoutOffset> + Send,
         qty: i32,
         poll_timeout: Option<std::time::Duration>,
         poll_interval: Option<std::time::Duration>,
