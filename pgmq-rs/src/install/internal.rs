@@ -3,13 +3,6 @@
 //! Items here are `pub` so sibling modules in `crate::install` can use them via `super::internal::*`.
 //! The `internal` module itself is declared `mod internal` (private) in `install/mod.rs`, so
 //! external callers cannot reach `pgmq::install::internal::*`.
-//!
-//! TODO(follow-up PR): consolidate the per-driver `install_sql` / `create_migrations_table` /
-//! `fetch_applied` / `insert_applied` bodies. The previous attempt stalled on the closure-shape
-//! mismatch between sqlx (`begin().await` → `Transaction`) and diesel (`conn.transaction(|c| ...)`
-//! callback). Plan: keep the transaction-driving outer functions per-driver, but extract a
-//! small `MigrationRowReader`-style trait covering `create_migrations_table` / `fetch_applied`
-//! / `insert_applied` so each driver implements three small methods instead of four big ones.
 
 use crate::install::script::MigrationScript;
 use crate::install::version::Version;

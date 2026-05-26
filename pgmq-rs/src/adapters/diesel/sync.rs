@@ -2,9 +2,8 @@
 //!
 //! Implements [`crate::Queue`] for [`&mut diesel::pg::PgConnection`](diesel::pg::PgConnection).
 //!
-//! The trait signature is `async fn`, but diesel's sync `PgConnection` runs everything
-//! synchronously. Method bodies execute diesel I/O on the calling thread; the returned future
-//! is **ready on first poll**.
+//! Method bodies execute diesel I/O on the calling thread; the returned future is **ready on
+//! first poll**.
 //!
 //! **This blocks the calling thread.** In async code (e.g. tokio), wrap calls in
 //! [`tokio::task::spawn_blocking`] so you don't stall the executor. In sync code, drive the

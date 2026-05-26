@@ -159,7 +159,6 @@ where
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn send_delay_with_headers<T: Serialize + Send + Sync, H: Serialize + Send + Sync>(
         self,
         queue_name: &str,

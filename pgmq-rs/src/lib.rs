@@ -31,7 +31,7 @@
 //!
 //! | Driver | Feature | Async? | Implements `Queue` on |
 //! |--------|---------|--------|------------------------------|
-//! | [sqlx](https://github.com/launchbadge/sqlx) (**default**) | `sqlx` | yes | `&mut PgConnection`, `&mut Transaction<'_, Postgres>` |
+//! | [sqlx](https://github.com/launchbadge/sqlx) (**default**) | `sqlx` | yes | `&PgPool`, `&mut PgConnection`, `&mut Transaction<'_, Postgres>` |
 //! | [tokio-postgres](https://github.com/sfackler/rust-postgres) | `tokio-postgres` | yes | `&Client`, `&Transaction<'_>` |
 //! | [diesel-async](https://github.com/weiznich/diesel_async) | `diesel-async` | yes | `&mut AsyncPgConnection` |
 //! | [diesel](https://github.com/diesel-rs/diesel) (sync) | `diesel-sync` | sync body, async signature | `&mut PgConnection` |
