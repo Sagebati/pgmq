@@ -16,7 +16,10 @@ pub fn poll_timeout_secs(d: std::time::Duration) -> i32 {
     i32::try_from(d.as_secs()).unwrap_or(i32::MAX)
 }
 
-pub fn poll_interval_ms(d: std::time::Duration) -> i32 {
+/// Convert a `Duration` to milliseconds as `i32`, clamping on overflow. Used both for poll
+/// intervals (`read_*_with_poll`) and notify-insert throttle intervals (`enable_notify_insert`
+/// / `update_notify_insert`).
+pub fn duration_as_ms_i32(d: std::time::Duration) -> i32 {
     i32::try_from(d.as_millis()).unwrap_or(i32::MAX)
 }
 
@@ -33,6 +36,23 @@ pub fn serialize_optional_list<H: Serialize>(
         Some(l) => Ok(Some(serialize_list(l)?)),
         None => Ok(None),
     }
+}
+
+/// Serialize an optional value into `Option<serde_json::Value>`. Mirror of
+/// [`serialize_optional_list`] for the single-value (non-slice) case — used by adapters when
+/// turning `Option<&H>` headers into the `jsonb` bind for `send` / `send_topic`.
+pub fn serialize_optional<H: Serialize>(
+    value: Option<&H>,
+) -> Result<Option<serde_json::Value>, serde_json::Error> {
+    value.map(serde_json::to_value).transpose()
+}
+
+/// Build the schema-qualified Postgres table name for a pgmq queue. The pgmq extension stores
+/// each queue's messages in `pgmq.q_<queue_name>` by convention; this helper is the single
+/// source of truth for that mapping (used by every adapter's `create_partitioned` to check
+/// whether the parent table already exists in `part_config`).
+pub fn queue_table_name(queue_name: &str) -> String {
+    format!("pgmq.q_{queue_name}")
 }
 
 /// Validate a queue or topic name. Returns `Err(PgmqError::InvalidQueueName)` if it fails.

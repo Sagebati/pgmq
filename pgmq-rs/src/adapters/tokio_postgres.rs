@@ -96,7 +96,8 @@
 
 use super::helpers::check_input;
 use super::helpers::{
-    poll_interval_ms, poll_timeout_secs, serialize_list, serialize_optional_list,
+    duration_as_ms_i32, poll_timeout_secs, queue_table_name, serialize_list, serialize_optional,
+    serialize_optional_list,
 };
 use super::query;
 use crate::errors::PgmqError;
@@ -224,7 +225,7 @@ mod imp {
         queue_name: &str,
     ) -> Result<bool, PgmqError> {
         check_input(queue_name)?;
-        let queue_table = format!("pgmq.q_{queue_name}");
+        let queue_table = queue_table_name(queue_name);
         let row = c
             .query_one(query::CREATE_PARTITIONED_EXISTS_CHECK, &[&queue_table])
             .await?;
@@ -319,10 +320,7 @@ mod imp {
     ) -> Result<i64, PgmqError> {
         check_input(queue_name)?;
         let message = serde_json::to_value(message)?;
-        let headers = match headers {
-            Some(h) => Some(serde_json::to_value(h)?),
-            None => None,
-        };
+        let headers = serialize_optional(headers)?;
         let delay_secs = delay.into().as_seconds();
         let row = c
             .query_one(query::SEND, &[&queue_name, &message, &headers, &delay_secs])
@@ -391,7 +389,7 @@ mod imp {
         let sql = query::read_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![&queue_name, &vt_secs, &max_batch_size];
         let pt = poll_timeout.map(poll_timeout_secs);
-        let pi = poll_interval.map(poll_interval_ms);
+        let pi = poll_interval.map(duration_as_ms_i32);
         if let Some(pt) = pt.as_ref() {
             params.push(pt);
         }
@@ -441,7 +439,7 @@ mod imp {
             query::read_grouped_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![&queue_name, &vt_secs, &qty];
         let pt = poll_timeout.map(poll_timeout_secs);
-        let pi = poll_interval.map(poll_interval_ms);
+        let pi = poll_interval.map(duration_as_ms_i32);
         if let Some(pt) = pt.as_ref() {
             params.push(pt);
         }
@@ -509,7 +507,7 @@ mod imp {
             query::read_grouped_rr_with_poll_sql(poll_timeout.is_some(), poll_interval.is_some());
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![&queue_name, &vt_secs, &qty];
         let pt = poll_timeout.map(poll_timeout_secs);
-        let pi = poll_interval.map(poll_interval_ms);
+        let pi = poll_interval.map(duration_as_ms_i32);
         if let Some(pt) = pt.as_ref() {
             params.push(pt);
         }
@@ -651,10 +649,7 @@ mod imp {
         delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<i32, PgmqError> {
         let message = serde_json::to_value(message)?;
-        let headers = match headers {
-            Some(h) => Some(serde_json::to_value(h)?),
-            None => None,
-        };
+        let headers = serialize_optional(headers)?;
         let delay_secs = delay.into().as_seconds();
         let row = c
             .query_one(
@@ -697,7 +692,7 @@ mod imp {
         throttle: std::time::Duration,
     ) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        let ms = i32::try_from(throttle.as_millis()).unwrap_or(i32::MAX);
+        let ms = duration_as_ms_i32(throttle);
         c.execute(query::ENABLE_NOTIFY_INSERT, &[&queue_name, &ms])
             .await?;
         Ok(())
@@ -719,7 +714,7 @@ mod imp {
         throttle: std::time::Duration,
     ) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        let ms = i32::try_from(throttle.as_millis()).unwrap_or(i32::MAX);
+        let ms = duration_as_ms_i32(throttle);
         c.execute(query::UPDATE_NOTIFY_INSERT, &[&queue_name, &ms])
             .await?;
         Ok(())

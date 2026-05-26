@@ -13,7 +13,8 @@
 //! See the crate-root and per-method documentation for usage patterns.
 
 use super::helpers::{
-    check_input, poll_interval_ms, poll_timeout_secs, serialize_list, serialize_optional_list,
+    check_input, duration_as_ms_i32, poll_timeout_secs, queue_table_name, serialize_list,
+    serialize_optional, serialize_optional_list,
 };
 use super::query;
 use crate::errors::PgmqError;
@@ -67,7 +68,7 @@ where
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn create_partitioned(self, queue_name: &str) -> Result<bool, PgmqError> {
         check_input(queue_name)?;
-        let queue_table = format!("pgmq.q_{queue_name}");
+        let queue_table = queue_table_name(queue_name);
         let mut conn = self.acquire().await?;
         let exists: bool = sqlx::query_scalar::<_, bool>(query::CREATE_PARTITIONED_EXISTS_CHECK)
             .bind(&queue_table)
@@ -169,10 +170,7 @@ where
     ) -> Result<i64, PgmqError> {
         check_input(queue_name)?;
         let message = serde_json::to_value(message)?;
-        let headers = match headers {
-            Some(h) => Some(serde_json::to_value(h)?),
-            None => None,
-        };
+        let headers = serialize_optional(headers)?;
         let mut conn = self.acquire().await?;
         Ok(sqlx::query_scalar::<_, i64>(query::SEND)
             .bind(queue_name)
@@ -244,7 +242,7 @@ where
             q = q.bind(poll_timeout_secs(t));
         }
         if let Some(i) = poll_interval {
-            q = q.bind(poll_interval_ms(i));
+            q = q.bind(duration_as_ms_i32(i));
         }
         let rows: Vec<Message<T>> = q.fetch_all(&mut *conn).await?;
         Ok(Some(rows))
@@ -288,7 +286,7 @@ where
             q = q.bind(poll_timeout_secs(t));
         }
         if let Some(i) = poll_interval {
-            q = q.bind(poll_interval_ms(i));
+            q = q.bind(duration_as_ms_i32(i));
         }
         Ok(q.fetch_all(&mut *conn).await?)
     }
@@ -348,7 +346,7 @@ where
             q = q.bind(poll_timeout_secs(t));
         }
         if let Some(i) = poll_interval {
-            q = q.bind(poll_interval_ms(i));
+            q = q.bind(duration_as_ms_i32(i));
         }
         Ok(q.fetch_all(&mut *conn).await?)
     }
@@ -491,10 +489,7 @@ where
         delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<i32, PgmqError> {
         let message = serde_json::to_value(message)?;
-        let headers = match headers {
-            Some(h) => Some(serde_json::to_value(h)?),
-            None => None,
-        };
+        let headers = serialize_optional(headers)?;
         let mut conn = self.acquire().await?;
         Ok(sqlx::query_scalar::<_, i32>(query::SEND_TOPIC)
             .bind(routing_key)
@@ -534,7 +529,7 @@ where
         throttle_interval: std::time::Duration,
     ) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        let ms = i32::try_from(throttle_interval.as_millis()).unwrap_or(i32::MAX);
+        let ms = duration_as_ms_i32(throttle_interval);
         let mut conn = self.acquire().await?;
         sqlx::query(query::ENABLE_NOTIFY_INSERT)
             .bind(queue_name)
@@ -562,7 +557,7 @@ where
         throttle_interval: std::time::Duration,
     ) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        let ms = i32::try_from(throttle_interval.as_millis()).unwrap_or(i32::MAX);
+        let ms = duration_as_ms_i32(throttle_interval);
         let mut conn = self.acquire().await?;
         sqlx::query(query::UPDATE_NOTIFY_INSERT)
             .bind(queue_name)

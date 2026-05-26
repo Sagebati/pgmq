@@ -123,7 +123,8 @@ use super::{
 };
 use crate::adapters::helpers::check_input;
 use crate::adapters::helpers::{
-    poll_interval_ms, poll_timeout_secs, serialize_list, serialize_optional_list,
+    duration_as_ms_i32, poll_timeout_secs, queue_table_name, serialize_list, serialize_optional,
+    serialize_optional_list,
 };
 use crate::adapters::query;
 use crate::errors::PgmqError;
@@ -158,7 +159,7 @@ impl Queue for &mut PgConnection {
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn create_partitioned(self, queue_name: &str) -> Result<bool, PgmqError> {
         check_input(queue_name)?;
-        let queue_table = format!("pgmq.q_{queue_name}");
+        let queue_table = queue_table_name(queue_name);
         let row: ExistsCol = sql_query(query::CREATE_PARTITIONED_EXISTS_CHECK)
             .bind::<sql_types::Text, _>(queue_table)
             .get_result(&mut *self)?;
@@ -243,10 +244,7 @@ impl Queue for &mut PgConnection {
     ) -> Result<i64, PgmqError> {
         check_input(queue_name)?;
         let message = serde_json::to_value(message)?;
-        let headers = match headers {
-            Some(h) => Some(serde_json::to_value(h)?),
-            None => None,
-        };
+        let headers = serialize_optional(headers)?;
         let row: SendCol = sql_query(query::SEND)
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::Jsonb, _>(message)
@@ -312,7 +310,7 @@ impl Queue for &mut PgConnection {
             q = q.bind::<sql_types::Integer, _>(poll_timeout_secs(t));
         }
         if let Some(i) = poll_interval {
-            q = q.bind::<sql_types::Integer, _>(poll_interval_ms(i));
+            q = q.bind::<sql_types::Integer, _>(duration_as_ms_i32(i));
         }
         let rows: Vec<MessageRowJson> = q.load(self)?;
         Ok(Some(
@@ -357,7 +355,7 @@ impl Queue for &mut PgConnection {
             q = q.bind::<sql_types::Integer, _>(poll_timeout_secs(t));
         }
         if let Some(i) = poll_interval {
-            q = q.bind::<sql_types::Integer, _>(poll_interval_ms(i));
+            q = q.bind::<sql_types::Integer, _>(duration_as_ms_i32(i));
         }
         let rows: Vec<MessageRowJson> = q.load(self)?;
         rows.into_iter().map(MessageRowJson::into_message).collect()
@@ -413,7 +411,7 @@ impl Queue for &mut PgConnection {
             q = q.bind::<sql_types::Integer, _>(poll_timeout_secs(t));
         }
         if let Some(i) = poll_interval {
-            q = q.bind::<sql_types::Integer, _>(poll_interval_ms(i));
+            q = q.bind::<sql_types::Integer, _>(duration_as_ms_i32(i));
         }
         let rows: Vec<MessageRowJson> = q.load(self)?;
         rows.into_iter().map(MessageRowJson::into_message).collect()
@@ -522,10 +520,7 @@ impl Queue for &mut PgConnection {
         delay: impl Into<VisibilityTimeoutOffset> + Send,
     ) -> Result<i32, PgmqError> {
         let message = serde_json::to_value(message)?;
-        let headers = match headers {
-            Some(h) => Some(serde_json::to_value(h)?),
-            None => None,
-        };
+        let headers = serialize_optional(headers)?;
         let row: SendTopicCol = sql_query(query::SEND_TOPIC)
             .bind::<sql_types::Text, _>(routing_key)
             .bind::<sql_types::Jsonb, _>(message)
@@ -558,7 +553,7 @@ impl Queue for &mut PgConnection {
         throttle: std::time::Duration,
     ) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        let ms = i32::try_from(throttle.as_millis()).unwrap_or(i32::MAX);
+        let ms = duration_as_ms_i32(throttle);
         sql_query(query::ENABLE_NOTIFY_INSERT)
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::Integer, _>(ms)
@@ -580,7 +575,7 @@ impl Queue for &mut PgConnection {
         throttle: std::time::Duration,
     ) -> Result<(), PgmqError> {
         check_input(queue_name)?;
-        let ms = i32::try_from(throttle.as_millis()).unwrap_or(i32::MAX);
+        let ms = duration_as_ms_i32(throttle);
         sql_query(query::UPDATE_NOTIFY_INSERT)
             .bind::<sql_types::Text, _>(queue_name)
             .bind::<sql_types::Integer, _>(ms)
