@@ -33,8 +33,10 @@
 //! |--------|---------|--------|------------------------------|
 //! | [sqlx](https://github.com/launchbadge/sqlx) (**default**) | `sqlx` | yes | `&PgPool`, `&mut PgConnection`, `&mut Transaction<'_, Postgres>` |
 //! | [tokio-postgres](https://github.com/sfackler/rust-postgres) | `tokio-postgres` | yes | `&Client`, `&Transaction<'_>` |
+//! | [diesel-async](https://github.com/weiznich/diesel_async) | `diesel-async` | yes | `&mut AsyncPgConnection` |
+//! | [diesel](https://github.com/diesel-rs/diesel) (sync) | `diesel-sync` | sync body, async signature | `&mut PgConnection` |
 //!
-//! Both drivers share the same `Queue` trait surface — same method names, same
+//! All four drivers share the same `Queue` trait surface — same method names, same
 //! return types. Switching drivers requires changing your imports and how you obtain a
 //! connection, but the queue calls themselves are identical.
 //!
@@ -70,8 +72,9 @@
 //! }
 //! ```
 //!
-//! For tokio-postgres, see [`adapters::tokio_postgres`] — exhaustive module doc covering setup,
-//! pool usage, transactions, and install.
+//! For the other drivers, see [`adapters::tokio_postgres`], [`adapters::diesel`] (async), and
+//! [`adapters::diesel::sync`]. Each has an exhaustive module doc covering setup, pool usage,
+//! transactions, and install.
 //!
 //! ## Common patterns
 //!
@@ -103,11 +106,13 @@
 //! a matching install module:
 //!
 //! - `pgmq::install::sqlx::install_sql_from_embedded(&pool).await?;`
-//! - `pgmq::install::tokio_postgres::install_sql_from_embedded(&mut client).await?;`
+//! - `pgmq::install::tokio_postgres::install_sql_from_embedded(&pool).await?;`
+//! - `pgmq::install::diesel_async::install_sql_from_embedded(&pool).await?;`
+//! - `pgmq::install::diesel_sync::install_sql_from_embedded(&mut conn)?;`
 //!
 //! Install is idempotent — calling it on an already-installed database is a no-op. There's
-//! also `install_sql_from_github` that fetches a specific version from GitHub instead of
-//! using the embedded scripts.
+//! also `install_sql_from_github` (async drivers only) that fetches a specific version
+//! from GitHub instead of using the embedded scripts.
 
 #![doc(html_root_url = "https://docs.rs/pgmq/")]
 
