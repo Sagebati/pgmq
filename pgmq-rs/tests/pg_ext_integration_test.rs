@@ -2,10 +2,10 @@
 //! sqlx shim. The shim delegates to the new [`pgmq::Queue`] trait on its inner pool, so these
 //! tests transitively cover the trait against sqlx.
 //!
-//! TODO(follow-up PR): parametrize this suite across all four drivers (sqlx, tokio-postgres,
-//! diesel-async, diesel-sync) so each adapter's `Queue` impl is exercised directly. The
-//! straightforward path is a macro that takes a `mod` name + `with-queue` callback and
-//! generates a sibling module per driver — but that lift is out of scope for this PR.
+//! TODO(follow-up PR): parametrize this suite across both supported drivers (sqlx and
+//! tokio-postgres) so each adapter's `Queue` impl is exercised directly. The straightforward
+//! path is a macro that takes a `mod` name + `with-queue` callback and generates a sibling
+//! module per driver — but that lift is out of scope for this PR.
 
 #![cfg(feature = "sqlx")]
 #![allow(deprecated)]

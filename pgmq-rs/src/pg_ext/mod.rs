@@ -46,8 +46,6 @@
 //!
 //! - [`crate::adapters::sqlx`] — `tx.send(...)`
 //! - [`crate::adapters::tokio_postgres`] — `tx.send(...)`
-//! - [`crate::adapters::diesel`] (async) — `conn.send(...)` inside `conn.transaction(|conn| ...)`
-//! - [`crate::adapters::diesel::sync`] — `conn.send(...)` inside `conn.transaction(|conn| ...)`
 //!
 //! ## See also
 //!

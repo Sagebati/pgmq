@@ -21,14 +21,12 @@
 //! |--------|--------|-------|
 //! | sqlx (default) | [`sqlx`] | `&sqlx::PgPool` |
 //! | tokio-postgres | [`tokio_postgres`] | `&mut tokio_postgres::Client` |
-//! | diesel-async | [`diesel_async`] | `&diesel_async::pooled_connection::deadpool::Pool<AsyncPgConnection>` |
-//! | diesel (sync) | [`diesel_sync`] | `&mut diesel::pg::PgConnection` (synchronous) |
 //!
-//! Each module exposes the same four functions:
+//! Each module exposes the same set of functions:
 //!
 //! - `init(...)` — runs `CREATE EXTENSION IF NOT EXISTS pgmq CASCADE` (use if you have the extension installed as a Postgres extension binary)
 //! - `install_sql_from_embedded(...)` — SQL-only install using scripts bundled with the crate (no Postgres extension binary required, no network)
-//! - `install_sql_from_github(...)` — SQL-only install fetching scripts from the pgmq GitHub repo (lets you pin a specific extension version); **not available for `diesel-sync`**
+//! - `install_sql_from_github(...)` — SQL-only install fetching scripts from the pgmq GitHub repo (lets you pin a specific extension version)
 //! - `installed_version(...)` — returns the currently-applied pgmq version, or `None` if not installed
 //! - `init_migrations_table(...)` — for upgrading from very old pre-versioned installs (rarely needed)
 //!
@@ -48,14 +46,6 @@
 //! // tokio-postgres (bring your own pool; install takes a `&mut Client`)
 //! let mut client = pool.get().await?;
 //! pgmq::install::tokio_postgres::install_sql_from_embedded(&mut client).await?;
-//!
-//! // diesel-async
-//! let pool: diesel_async::pooled_connection::deadpool::Pool<AsyncPgConnection> = /* … */;
-//! pgmq::install::diesel_async::install_sql_from_embedded(&pool).await?;
-//!
-//! // diesel (sync)
-//! let mut conn = diesel::pg::PgConnection::establish(url)?;
-//! pgmq::install::diesel_sync::install_sql_from_embedded(&mut conn)?;
 //! ```
 //!
 //! ## CLI
@@ -85,12 +75,6 @@ pub mod sqlx;
 
 #[cfg(feature = "tokio-postgres")]
 pub mod tokio_postgres;
-
-#[cfg(feature = "diesel-async")]
-pub mod diesel_async;
-
-#[cfg(feature = "diesel-sync")]
-pub mod diesel_sync;
 
 /// Helper method to reduce the boilerplate required to create a [`PgmqError::InstallationError`].
 fn install_err(err: impl ToString) -> PgmqError {

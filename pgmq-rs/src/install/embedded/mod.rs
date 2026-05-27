@@ -32,8 +32,8 @@ impl ScriptFetcher for EmbeddedScriptFetcher {
 
 impl EmbeddedScriptFetcher {
     /// Synchronous variant of [`Self::fetch`]. The embedded fetcher does no I/O — it reads
-    /// from compile-time-embedded scripts — so callers in sync contexts (e.g. the
-    /// `diesel-sync` install path) can use this directly without an async runtime.
+    /// from compile-time-embedded scripts — so callers in sync contexts can use this directly
+    /// without an async runtime.
     pub fn fetch_sync(
         &self,
         installed_version: Option<&Version>,

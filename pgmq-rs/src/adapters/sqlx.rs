@@ -28,8 +28,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Acquire, Postgres};
 
 /// Sealed marker trait — restricts the blanket [`Queue`] impl below to the three sqlx
-/// types we want to support, without conflicting with the per-driver impls in
-/// `tokio_postgres` / `diesel_async` / `diesel_sync` adapters.
+/// types we want to support, without conflicting with the per-driver impls in the
+/// `tokio_postgres` adapter.
 mod sealed {
     pub trait SqlxConn {}
     impl SqlxConn for &sqlx::PgPool {}
@@ -595,10 +595,8 @@ where
 
 /// Sqlx-native LISTEN/NOTIFY helpers for queue insert notifications.
 ///
-/// Other adapters don't currently expose a listener (tokio-postgres's `AsyncMessage` stream
-/// and diesel-sync's `pg_notifications()` are usable but require non-trivial wiring; we'll add
-/// driver-specific listeners as separate sub-modules once their patterns settle). Use these
-/// directly when you're on sqlx.
+/// The tokio-postgres adapter does not currently expose a listener helper; its `AsyncMessage`
+/// stream is usable but requires non-trivial wiring. Use these directly when you're on sqlx.
 pub mod listener {
     use crate::adapters::helpers::check_input;
     use crate::errors::PgmqError;

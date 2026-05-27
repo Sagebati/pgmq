@@ -7,7 +7,7 @@ The Rust client for [PGMQ](https://github.com/pgmq/pgmq), a lightweight, durable
 
 `pgmq` is an **extension trait**: bring [`Queue`] into scope and call queue methods directly on your existing
 Postgres connection or transaction. There's no constructor and no pool wrapper — you bring your own pool (or no pool
-at all). Works with **sqlx** (default), **tokio-postgres**, **diesel-async**, and **diesel** (sync).
+at all). Works with **sqlx** (default) and **tokio-postgres**.
 
 ## Quick start (sqlx)
 
@@ -53,10 +53,8 @@ async fn main() -> Result<(), pgmq::PgmqError> {
 |---|---|---|
 | [sqlx](https://github.com/launchbadge/sqlx) (default) | `sqlx` | `&mut PgConnection`, `&mut Transaction<'_, Postgres>` |
 | [tokio-postgres](https://github.com/sfackler/rust-postgres) | `tokio-postgres` | `&Client`, `&Transaction<'_>` |
-| [diesel-async](https://github.com/weiznich/diesel_async) | `diesel-async` | `&mut AsyncPgConnection` |
-| [diesel](https://github.com/diesel-rs/diesel) (sync) | `diesel-sync` | `&mut PgConnection` |
 
-All four drivers share the same trait surface. Switching drivers means changing how you obtain a connection — the queue
+Both drivers share the same trait surface. Switching drivers means changing how you obtain a connection — the queue
 calls themselves are identical.
 
 ```toml
@@ -65,10 +63,8 @@ pgmq = { version = "0.34", default-features = false, features = ["tokio-postgres
 ```
 
 Each adapter has its own module-level documentation covering setup, pool usage, transactions, and install with
-runnable examples: see [`pgmq::adapters::sqlx`](https://docs.rs/pgmq/latest/pgmq/adapters/sqlx/),
-[`pgmq::adapters::tokio_postgres`](https://docs.rs/pgmq/latest/pgmq/adapters/tokio_postgres/),
-[`pgmq::adapters::diesel_async`](https://docs.rs/pgmq/latest/pgmq/adapters/diesel_async/),
-[`pgmq::adapters::diesel_sync`](https://docs.rs/pgmq/latest/pgmq/adapters/diesel_sync/).
+runnable examples: see [`pgmq::adapters::sqlx`](https://docs.rs/pgmq/latest/pgmq/adapters/sqlx/) and
+[`pgmq::adapters::tokio_postgres`](https://docs.rs/pgmq/latest/pgmq/adapters/tokio_postgres/).
 
 ## Composing with your own transactions
 
@@ -108,10 +104,8 @@ pgmq::install::sqlx::install_sql_from_github(&pool, Some("1.9.0")).await?;
 # }
 ```
 
-For other drivers, see the per-driver install module:
-[`pgmq::install::tokio_postgres`](https://docs.rs/pgmq/latest/pgmq/install/tokio_postgres/),
-[`pgmq::install::diesel_async`](https://docs.rs/pgmq/latest/pgmq/install/diesel_async/),
-[`pgmq::install::diesel_sync`](https://docs.rs/pgmq/latest/pgmq/install/diesel_sync/) (sync, embedded only).
+For tokio-postgres, see
+[`pgmq::install::tokio_postgres`](https://docs.rs/pgmq/latest/pgmq/install/tokio_postgres/).
 
 ### Via CLI (one-shot install, no app code)
 

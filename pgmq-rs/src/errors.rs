@@ -16,7 +16,7 @@ pub enum PgmqError {
     RowDecodeError { column: String, reason: String },
 
     /// Returned when a queue/topic name fails client-side validation. Names must be
-    /// non-empty, at most 48 characters, and contain only ASCII alphanumerics or underscores.
+    /// non-empty, at most 47 characters, and contain only ASCII alphanumerics or underscores.
     #[error("invalid queue name: '{name}'")]
     InvalidQueueName { name: String },
 
@@ -40,14 +40,4 @@ pub enum PgmqError {
     #[cfg(feature = "tokio-postgres")]
     #[error("tokio-postgres error: {0}")]
     TokioPostgresError(#[from] tokio_postgres::Error),
-
-    /// diesel driver error (used by both diesel-async and diesel-sync adapters).
-    #[cfg(any(feature = "diesel-async", feature = "diesel-sync"))]
-    #[error("diesel error: {0}")]
-    DieselError(#[from] diesel::result::Error),
-
-    /// diesel-async deadpool pool error.
-    #[cfg(feature = "diesel-async")]
-    #[error("diesel-async pool error: {0}")]
-    DieselAsyncPoolError(#[from] diesel_async::pooled_connection::deadpool::PoolError),
 }
