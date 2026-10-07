@@ -1,9 +1,6 @@
 use crate::install::install_err;
 use crate::PgmqError;
 use regex::Regex;
-use sqlx::encode::IsNull;
-use sqlx::error::BoxDynError;
-use sqlx::{Database, Decode, Encode, Type};
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
@@ -24,33 +21,38 @@ pub struct Version {
     pub patch: u32,
 }
 
-impl<'r, DB: Database> Decode<'r, DB> for Version
+#[cfg(feature = "sqlx")]
+impl<'r, DB: sqlx::Database> sqlx::Decode<'r, DB> for Version
 where
-    &'r str: Decode<'r, DB>,
+    &'r str: sqlx::Decode<'r, DB>,
 {
-    fn decode(value: <DB as Database>::ValueRef<'r>) -> Result<Self, BoxDynError> {
-        let value = <&str as Decode<DB>>::decode(value)?;
+    fn decode(
+        value: <DB as sqlx::Database>::ValueRef<'r>,
+    ) -> Result<Self, sqlx::error::BoxDynError> {
+        let value = <&str as sqlx::Decode<DB>>::decode(value)?;
         let value = Self::from_str(value)?;
         Ok(value)
     }
 }
 
-impl<'q, DB: Database> Encode<'q, DB> for Version
+#[cfg(feature = "sqlx")]
+impl<'q, DB: sqlx::Database> sqlx::Encode<'q, DB> for Version
 where
-    String: Encode<'q, DB>,
+    String: sqlx::Encode<'q, DB>,
 {
     fn encode_by_ref(
         &self,
-        buf: &mut <DB as Database>::ArgumentBuffer,
-    ) -> Result<IsNull, BoxDynError> {
+        buf: &mut <DB as sqlx::Database>::ArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
         let value = self.to_string();
         <String as sqlx::Encode<'_, DB>>::encode_by_ref(&value, buf)
     }
 }
 
-impl<DB: Database> Type<DB> for Version
+#[cfg(feature = "sqlx")]
+impl<DB: sqlx::Database> sqlx::Type<DB> for Version
 where
-    String: Type<DB>,
+    String: sqlx::Type<DB>,
 {
     fn type_info() -> DB::TypeInfo {
         <String as sqlx::Type<DB>>::type_info()

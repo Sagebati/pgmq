@@ -61,8 +61,11 @@ pub async fn install_pgmq(
 /// Advisory lock key used to ensure only one transaction can run the `pgmq` installation process
 /// at once. Select a random large negative `bigint` value to minimize the chances of conflicting
 /// with another advisory lock used by the actual application.
-#[cfg(feature = "sqlx")]
-const ADVISORY_LOCK_KEY: i64 = -9223372036854775808 + 4149;
+#[cfg(any(
+    feature = "sqlx",
+    all(feature = "install-sql", feature = "diesel-async")
+))]
+pub(crate) const ADVISORY_LOCK_KEY: i64 = -9223372036854775808 + 4149;
 
 /// Acquire an advisory lock to be sure that only one transaction can run the pgmq SQL
 /// installation/upgrade process at once. Without this, it's possible for multiple transactions

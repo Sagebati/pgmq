@@ -21,7 +21,9 @@ required-features = ["cli"]
 [features]
 default = ["sqlx"]
 cli = ["sqlx", "clap", "install-sql-github", "install-sql-embedded", "env_logger"]
-install-sql = ["sqlx", "futures-util", "regex", "itertools"]
+# Driver-agnostic install machinery. The entry points live in per-driver modules:
+# `install::*` for `sqlx`, `install::diesel_async::*` for `diesel-async`.
+install-sql = ["futures-util", "regex", "itertools"]
 install-sql-github = ["install-sql", "reqwest", "url/serde"]
 install-sql-embedded = ["install-sql", "include_dir"]
 queue-experimental = []

@@ -1,4 +1,8 @@
 use crate::install::script::ParsedScriptName;
+use crate::install::sql::{
+    CREATE_MIGRATIONS_TABLE, CREATE_SCHEMA, INSERT_APPLIED_MIGRATION, LOCK_MIGRATIONS_TABLE,
+    SELECT_APPLIED_MIGRATIONS,
+};
 use crate::install::version::Version;
 use crate::util::init_lock;
 use crate::PgmqError;
@@ -27,22 +31,18 @@ impl AppliedMigration {
         The `pgmq` schema will not exist yet if we're currently performing a fresh installation
         of `pgmq`, so we first need to make sure the schema exists.
          */
-        sqlx::query("CREATE SCHEMA IF NOT EXISTS pgmq;")
+        sqlx::query(CREATE_SCHEMA).execute(&mut **txn).await?;
+
+        sqlx::query(CREATE_MIGRATIONS_TABLE)
             .execute(&mut **txn)
             .await?;
-
-        sqlx::query(
-        "CREATE TABLE IF NOT EXISTS pgmq.__pgmq_migrations ( name TEXT PRIMARY KEY NOT NULL, version TEXT NOT NULL, run_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT clock_timestamp());",
-        )
-        .execute(&mut **txn)
-        .await?;
 
         /*
         The advisory lock above is probably sufficient, but we also lock on the
         `pgmq.__pgmq_migrations` table to be sure that only one transaction can access the
         list of applied migrations at once.
          */
-        sqlx::query("LOCK TABLE pgmq.__pgmq_migrations IN ACCESS EXCLUSIVE MODE;")
+        sqlx::query(LOCK_MIGRATIONS_TABLE)
             .execute(&mut **txn)
             .await?;
 
@@ -53,7 +53,7 @@ impl AppliedMigration {
     pub async fn fetch_all(
         tx: &mut Transaction<'static, Postgres>,
     ) -> Result<Vec<AppliedMigration>, PgmqError> {
-        let applied_migrations = sqlx::query_as("SELECT name, version FROM pgmq.__pgmq_migrations")
+        let applied_migrations = sqlx::query_as(SELECT_APPLIED_MIGRATIONS)
             .fetch_all(tx.acquire().await?)
             .await?;
         Ok(applied_migrations)
@@ -63,10 +63,9 @@ impl AppliedMigration {
     pub fn insert_script(
         name: &'_ ParsedScriptName,
     ) -> Result<Query<'_, Postgres, PgArguments>, PgmqError> {
-        let query =
-            sqlx::query("INSERT INTO pgmq.__pgmq_migrations ( name, version ) VALUES ( $1, $2 );")
-                .bind(&name.original)
-                .bind(&name.to);
+        let query = sqlx::query(INSERT_APPLIED_MIGRATION)
+            .bind(&name.original)
+            .bind(&name.to);
         Ok(query)
     }
 }

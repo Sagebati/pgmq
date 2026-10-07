@@ -1,9 +1,12 @@
+#[cfg(feature = "sqlx")]
 use crate::install::applied::AppliedMigration;
 use crate::install::install_err;
 use crate::install::version::Version;
 use crate::PgmqError;
+#[cfg(feature = "sqlx")]
 use futures_util::StreamExt;
 use regex::Regex;
+#[cfg(feature = "sqlx")]
 use sqlx::{AssertSqlSafe, Executor, Postgres, Transaction};
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -86,6 +89,7 @@ pub struct MigrationScript {
     pub content: Cow<'static, str>,
 }
 
+#[cfg(feature = "sqlx")]
 impl MigrationScript {
     /// Run this script and mark it as applied in the DB.
     pub async fn run(&self, txn: &mut Transaction<'static, Postgres>) -> Result<(), PgmqError> {

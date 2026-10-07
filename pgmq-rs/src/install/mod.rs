@@ -1,20 +1,41 @@
+// The script/version/fetcher machinery is driver-agnostic; only the entry points below (sqlx) and
+// in `diesel_async` touch a database. Without a driver the machinery is unreachable, which is a
+// valid (if useless) feature combination, so silence dead-code there rather than forbid it.
+#[cfg(feature = "sqlx")]
 mod applied;
+#[cfg(feature = "diesel-async")]
+pub mod diesel_async;
 #[cfg(feature = "install-sql-embedded")]
+#[cfg_attr(not(any(feature = "sqlx", feature = "diesel-async")), allow(dead_code))]
 mod embedded;
 #[cfg(feature = "install-sql-github")]
+#[cfg_attr(not(any(feature = "sqlx", feature = "diesel-async")), allow(dead_code))]
 mod github;
+#[cfg_attr(
+    not(all(
+        any(feature = "sqlx", feature = "diesel-async"),
+        any(feature = "install-sql-embedded", feature = "install-sql-github")
+    )),
+    allow(dead_code)
+)]
 mod script;
+#[cfg_attr(not(any(feature = "sqlx", feature = "diesel-async")), allow(dead_code))]
+mod sql;
 mod version;
 
 pub use version::Version;
 
 use crate::errors::PgmqError;
+#[cfg(feature = "sqlx")]
 use crate::install::applied::AppliedMigration;
+#[cfg(feature = "sqlx")]
 use crate::install::script::{ParsedScriptName, ScriptFetcher};
+#[cfg(feature = "sqlx")]
 use itertools::Itertools;
+#[cfg(feature = "sqlx")]
 use sqlx::{Pool, Postgres};
 
-#[cfg(feature = "install-sql")]
+#[cfg(feature = "sqlx")]
 #[doc = include_str!("init_migrations_table.md")]
 pub async fn init_migrations_table(
     pool: &Pool<Postgres>,
@@ -34,7 +55,7 @@ pub async fn init_migrations_table(
     Ok(())
 }
 
-#[cfg(feature = "install-sql")]
+#[cfg(feature = "sqlx")]
 #[doc = include_str!("installed_version.md")]
 pub async fn installed_version(pool: &Pool<Postgres>) -> Result<Option<Version>, PgmqError> {
     let mut tx = pool.begin().await?;
@@ -48,6 +69,7 @@ pub async fn installed_version(pool: &Pool<Postgres>) -> Result<Option<Version>,
     Ok(installed_version)
 }
 
+#[cfg(feature = "sqlx")]
 #[cfg(feature = "install-sql-github")]
 #[doc = include_str!("./github/install_sql_github.md")]
 pub async fn install_sql_from_github(
@@ -57,12 +79,14 @@ pub async fn install_sql_from_github(
     install_sql(pool, github::GitHubScriptFetcher::new(version).await?).await
 }
 
+#[cfg(feature = "sqlx")]
 #[cfg(feature = "install-sql-embedded")]
 #[doc = include_str!("./embedded/install_sql_embedded.md")]
 pub async fn install_sql_from_embedded(pool: &Pool<Postgres>) -> Result<(), PgmqError> {
     install_sql(pool, embedded::EmbeddedScriptFetcher).await
 }
 
+#[cfg(feature = "sqlx")]
 async fn install_sql(
     pool: &Pool<Postgres>,
     script_fetcher: impl ScriptFetcher,
